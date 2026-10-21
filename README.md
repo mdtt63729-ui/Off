@@ -11,7 +11,7 @@ Native Android application built with Kotlin, Jetpack Compose, and Material 3.
 - Dark Material 3 visual design.
 
 ## Important build/dependency note
-This project uses `com.arthenica:ffmpeg-kit-full-gpl:6.0-2`. FFmpegKit upstream has been retired, and availability of its Android artifacts can change. Verify that the dependency is resolvable in your build environment before treating this project as release-ready. If it cannot be resolved, replace it with a maintained, legally compatible FFmpeg Android distribution and update the license notices. The build has not been executed or verified in this delivery.
+FFmpegKit upstream (the `com.arthenica:ffmpeg-kit-*` line) was retired in 2025 and its Maven artifacts were removed, so the original `com.arthenica:ffmpeg-kit-full-gpl:6.0-2` no longer resolves. This project now depends on the maintained drop-in fork `dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.9`, which keeps the same `com.arthenica.ffmpegkit` package and API. That build is LGPL-3.0 and includes `libmp3lame` (MP3 encoding). If you need `x264`/`x265` and your app is GPL-compatible, switch to the `-full-gpl` artifact instead.
 
 ## Build
 1. Open the project in Android Studio or a compatible Android Gradle environment.

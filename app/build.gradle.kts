@@ -62,8 +62,12 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.8.5")
 
-    // NOTE: FFmpegKit upstream is retired. Verify artifact availability/licensing before release.
-    implementation("com.arthenica:ffmpeg-kit-full-gpl:6.0-2")
+    // FFmpegKit (com.arthenica) was retired in 2025 and its Maven artifacts were removed,
+    // so the original "com.arthenica:ffmpeg-kit-full-gpl:6.0-2" no longer resolves.
+    // This is the maintained drop-in fork: identical com.arthenica.ffmpegkit package/API,
+    // just a different groupId. The LGPL "full" build includes libmp3lame for MP3 encoding.
+    // Only switch to "-full-gpl" if you need x264/x265 and your app is GPL-compatible.
+    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.9")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
