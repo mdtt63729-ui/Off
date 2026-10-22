@@ -12,11 +12,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # Set these repository secrets to have CI produce a signed APK as well.
+      # Set these repository secrets to have CI produce a signed APK.
       #   KEYSTORE_BASE64   base64 -w0 off-release.jks
       #   KEYSTORE_PASSWORD store password
       #   KEY_PASSWORD      key password
       #   KEY_ALIAS         key alias (e.g. off)
+      # When they are present the signed APK is the artifact; the unsigned APK
+      # is only uploaded as a fallback when they are absent.
       KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
       KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
       KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
@@ -56,19 +58,20 @@ jobs:
             "$OUT/app-release-aligned.apk"
           "$BT/apksigner" verify --print-certs "$OUT/app-release-signed.apk"
 
-      - name: Upload unsigned APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Off-v3.3.0-unsigned-apk
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Upload signed APK artifact
         if: env.KEYSTORE_BASE64 != ''
         uses: actions/upload-artifact@v4
         with:
-          name: Off-v3.3.0-signed-apk
+          name: Off-v3.3.0-apk
           path: app/build/outputs/apk/release/app-release-signed.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload unsigned APK artifact (no signing secrets set)
+        if: env.KEYSTORE_BASE64 == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Off-v3.3.0-unsigned-apk
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
           retention-days: 14
