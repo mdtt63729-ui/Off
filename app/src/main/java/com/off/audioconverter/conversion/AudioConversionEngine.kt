@@ -96,7 +96,7 @@ class AudioConversionEngine(
                 command += listOf("-f", "mp3", output.absolutePath)
 
                 val session = runSession(command)
-                if (ReturnCode.isSuccess(session.first) && output.exists() && output.length() > 0L) {
+                if (session.first && output.exists() && output.length() > 0L) {
                     return@withContext ConversionResult.Success(output)
                 }
                 lastDetail = session.second
@@ -124,8 +124,8 @@ class AudioConversionEngine(
         activeSessionId?.let { FFmpegKit.cancel(it) }
     }
 
-    /** Returns the FFmpeg return code plus a short, human-readable reason on failure. */
-    private suspend fun runSession(command: List<String>): Pair<Int, String?> {
+    /** Returns whether the run succeeded plus a short, human-readable reason on failure. */
+    private suspend fun runSession(command: List<String>): Pair<Boolean, String?> {
         val session = suspendCancellableCoroutine { continuation ->
             val running = FFmpegKit.executeWithArgumentsAsync(
                 command.toTypedArray(),
@@ -137,13 +137,9 @@ class AudioConversionEngine(
             continuation.invokeOnCancellation { FFmpegKit.cancel(running.sessionId) }
         }
         activeSessionId = null
-        val code = session.returnCode?.value ?: -1
-        val detail = if (ReturnCode.isSuccess(session.returnCode)) {
-            null
-        } else {
-            extractReason(session.allLogsAsString)
-        }
-        return code to detail
+        val success = ReturnCode.isSuccess(session.returnCode)
+        val detail = if (success) null else extractReason(session.allLogsAsString)
+        return success to detail
     }
 
     /** null = unknown, true/false = probed result. */
