@@ -32,7 +32,7 @@ jobs:
       - name: Upload unsigned APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Off-v1.0.0-unsigned-apk
+          name: Off-v3.0.0-unsigned-apk
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14

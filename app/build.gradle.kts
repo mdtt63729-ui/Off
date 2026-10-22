@@ -12,9 +12,10 @@ android {
         applicationId = "com.off.audioconverter"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 4
+        versionName = "3.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables { useSupportLibrary = true }
     }
 
     buildTypes {
@@ -31,6 +32,8 @@ android {
     }
 
     compileOptions {
+        // Required by NewPipe Extractor on minSdk < 33 (java.nio / java.time APIs).
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -42,6 +45,9 @@ android {
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        resources.excludes += "/META-INF/DEPENDENCIES"
+        resources.excludes += "/META-INF/LICENSE*"
+        resources.excludes += "/META-INF/NOTICE*"
     }
 }
 
@@ -61,13 +67,20 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.8.5")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
-    // FFmpegKit (com.arthenica) was retired in 2025 and its Maven artifacts were removed,
-    // so the original "com.arthenica:ffmpeg-kit-full-gpl:6.0-2" no longer resolves.
-    // This is the maintained drop-in fork: identical com.arthenica.ffmpegkit package/API,
-    // just a different groupId. The LGPL "full" build includes libmp3lame for MP3 encoding.
-    // Only switch to "-full-gpl" if you need x264/x265 and your app is GPL-compatible.
+    // Media3 / ExoPlayer: background playback, media session, mini + full player.
+    implementation("androidx.media3:media3-exoplayer:1.5.1")
+    implementation("androidx.media3:media3-session:1.5.1")
+    implementation("androidx.media3:media3-ui:1.5.1")
+
+    // YouTube search + audio stream resolution (drop-in for the retired extractor).
+    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.3")
+
+    // Maintained LGPL FFmpegKit fork; includes libmp3lame for MP3 encoding.
     implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.9")
+
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.4")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")

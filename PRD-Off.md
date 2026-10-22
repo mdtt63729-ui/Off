@@ -238,3 +238,39 @@ FFmpegKit upstream is retired. The selected artifact in this starter project may
 3. Background execution limits differ by Android version.
 4. “Unsigned APK” is a build artifact, not necessarily directly installable.
 5. Final package ID, icon, and app version should be confirmed before store publication.
+
+---
+
+# Off 2.0 implementation addendum
+
+**Version:** 2.0.0  
+**UI:** Native Jetpack Compose + Material 3  
+**Focus:** polished audio editing flow, motion, result/save handling and persistent local library
+
+## Implemented in the v2.0 project
+
+- Reworked Studio home with Material 3 cards, clear primary action, privacy statement and library entry.
+- Dedicated Editor page with trim start/end controls, bitrate chips, speed, volume, fade-in and fade-out controls. The values are passed into the FFmpeg command rather than remaining decorative.
+- Separate Export/Progress page and Result page. The progress indicator is intentionally indeterminate because the current synchronous FFmpeg wrapper does not provide reliable live percentage updates.
+- Animated page changes using Compose transitions, plus a Settings toggle for gentler fade-only navigation.
+- Persistent library records storing the exact saved content URI, name, timestamp and byte size.
+- Save action writes into `Downloads/Off` using MediaStore on Android 10+, and uses Android's create-document picker on older Android versions.
+- Deletion is scoped to the single URI associated with a selected library entry. The app never recursively deletes Downloads or unrelated files.
+- Version metadata and GitHub Actions artifact name updated to 2.0.0.
+
+## Material 3 and motion acceptance criteria
+
+- Use the app theme's Material 3 color roles and components for buttons, cards, chips, sliders, dialogs, navigation, snackbars and progress states.
+- Touch actions should have native Compose ripple/indication and immediate enabled/disabled feedback.
+- Navigation transitions must not block touch input or keep hidden screens active unnecessarily.
+- Reduced-motion preference switches page transitions to fades.
+- Scrollable content must work on small screens and with font scaling.
+- Do not fake conversion percentages; use indeterminate progress until the conversion integration exposes trustworthy statistics.
+
+## Known gaps requiring further work before claiming a full professional editor
+
+- Waveform drawing is currently a visual placeholder; it is not yet derived from decoded audio samples and does not provide draggable waveform handles.
+- The UI does not yet provide an in-app audio playback/seek/loop preview.
+- Output format remains MP3. M4A/AAC/WAV/FLAC, embedded tags, album art, batch queue, persistent job recovery, foreground-service conversion, and detailed diagnostics remain future work.
+- The conversion engine currently uses the FFmpeg synchronous execution API on an IO dispatcher. It keeps the main thread free, but cancellation during the blocking FFmpeg call should be upgraded to an asynchronous FFmpeg session callback for fully reliable immediate cancellation.
+- Validate filter combinations and very short trim/fade ranges with real files before release. Run a clean GitHub Actions build and device tests on supported Android versions before distributing the APK.
