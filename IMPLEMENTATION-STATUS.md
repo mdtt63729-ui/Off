@@ -97,3 +97,16 @@
 - Live preview playback is kept, so speed, volume and the trim range still apply as you move them.
 - The FFmpeg waveform image was dropped in favour of the design's bar waveform, driven by the real
   playback position.
+
+## v3.8.0 — skeleton loading and fade-in
+- New `ui/components/Skeleton.kt`: `SkeletonBox` (a shimmering sweep), `SkeletonLine`, and
+  `SkeletonImage`, which shows a skeleton until the picture has actually loaded and then fades it
+  in over ~400ms. A failed image falls back to an icon instead of shimmering forever.
+- **Video screen**: tapping Fetch now shows a full skeleton card — a 16:9 block, title and
+  subtitle lines, a description block and chip placeholders — and the real card fades in when the
+  data arrives. The thumbnail itself shimmers until the image loads, then fades in.
+- **Search**: cover art in every result row shimmers and fades in, and a running search shows five
+  skeleton rows instead of a bare spinner.
+- **Library**: favourite/playlist rows use the same image treatment.
+- **Editor**: the 16:9 header frame shimmers until the frame has been pulled out of the video,
+  then fades in.

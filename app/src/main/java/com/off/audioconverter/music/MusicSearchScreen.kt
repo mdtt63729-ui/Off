@@ -80,6 +80,9 @@ import com.off.audioconverter.download.DownloadTask
 import com.off.audioconverter.library.LibraryStore
 import com.off.audioconverter.player.AddToPlaylistDialog
 import com.off.audioconverter.player.PlayerController
+import com.off.audioconverter.ui.components.SkeletonBox
+import com.off.audioconverter.ui.components.SkeletonImage
+import com.off.audioconverter.ui.components.SkeletonLine
 import com.off.audioconverter.ui.SettingsStore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -211,7 +214,7 @@ fun MusicSearchScreen(modifier: Modifier = Modifier) {
                     }
                 )
 
-                loading && allTracks.isEmpty() -> LoadingState()
+                loading && allTracks.isEmpty() -> SearchSkeleton()
 
                 allTracks.isEmpty() && !loading -> EmptyState(query = query.trim())
 
@@ -482,25 +485,37 @@ private fun TrackRow(
 
 @Composable
 private fun Artwork(track: Track, size: androidx.compose.ui.unit.Dp, radius: androidx.compose.ui.unit.Dp) {
-    Surface(
+    // Shimmers until the cover has actually loaded, then fades in.
+    SkeletonImage(
+        model = track.artworkUrl,
+        contentDescription = "${track.title} artwork",
         shape = RoundedCornerShape(radius),
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        fallback = Icons.Default.MusicNote,
         modifier = Modifier.size(size)
+    )
+}
+
+/** Placeholder rows shown while a search is in flight. */
+@Composable
+private fun SearchSkeleton() {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        if (track.artworkUrl != null) {
-            AsyncImage(
-                model = track.artworkUrl,
-                contentDescription = "${track.title} artwork",
-                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(radius))
-            )
-        } else {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.MusicNote,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(size / 2.4f)
-                )
+        repeat(5) {
+            ElevatedCard(Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    SkeletonBox(Modifier.size(54.dp), RoundedCornerShape(15.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SkeletonLine(width = 170.dp, height = 14.dp)
+                        SkeletonLine(width = 110.dp, height = 11.dp)
+                    }
+                    SkeletonBox(Modifier.size(40.dp), RoundedCornerShape(20.dp))
+                }
             }
         }
     }

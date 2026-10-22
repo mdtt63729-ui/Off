@@ -60,6 +60,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.off.audioconverter.ui.components.MaterialLoadingIndicator
+import com.off.audioconverter.ui.components.SkeletonBox
+import com.off.audioconverter.ui.components.SkeletonImage
+import com.off.audioconverter.ui.components.SkeletonLine
+import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -107,6 +111,12 @@ fun VideoDownloadScreen(
             loading = false
         }
     }
+
+    val infoAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (info != null) 1f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(420),
+        label = "video-info-fade"
+    )
 
     val selection: DownloadSelection? = if (mode == 0) {
         quality?.let {
@@ -177,38 +187,22 @@ fun VideoDownloadScreen(
             Text(if (loading) "Reading the link…" else "Fetch video")
         }
 
+        if (loading && info == null) {
+            VideoInfoSkeleton()
+        }
+
         info?.let { video ->
-            Card(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth().graphicsLayer { alpha = infoAlpha }) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
                     // 16:9 thumbnail, edge to edge inside the card.
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(16f / 9f)
-                            .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-                    ) {
-                        if (video.thumbnailUrl != null) {
-                            AsyncImage(
-                                model = video.thumbnailUrl,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Box(
-                                Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.Movie,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    modifier = Modifier.size(48.dp)
-                                )
-                            }
-                        }
-                    }
+                    SkeletonImage(
+                        model = video.thumbnailUrl,
+                        contentDescription = null,
+                        shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
+                        fallback = Icons.Default.Movie,
+                        modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                    )
 
                     Column(
                         Modifier.padding(horizontal = 14.dp),
@@ -472,6 +466,39 @@ fun VideoDownloadScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+/** Placeholder for the whole video card while the link is being read. */
+@Composable
+private fun VideoInfoSkeleton() {
+    Card(Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SkeletonBox(
+                Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+            )
+            Column(
+                Modifier.padding(horizontal = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SkeletonLine(width = 250.dp, height = 16.dp)
+                SkeletonLine(width = 150.dp, height = 12.dp)
+            }
+            SkeletonBox(
+                Modifier.fillMaxWidth().height(84.dp).padding(horizontal = 14.dp),
+                RoundedCornerShape(14.dp)
+            )
+            Row(
+                Modifier.padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                repeat(3) {
+                    SkeletonBox(Modifier.width(74.dp).height(32.dp), RoundedCornerShape(16.dp))
+                }
+            }
+            Spacer(Modifier.height(14.dp))
         }
     }
 }

@@ -159,6 +159,9 @@ import com.off.audioconverter.player.MiniPlayer
 import com.off.audioconverter.player.PlayerController
 import com.off.audioconverter.ui.SettingsStore
 import com.off.audioconverter.video.VideoDownloadScreen
+import com.off.audioconverter.ui.components.SkeletonBox
+import com.off.audioconverter.ui.components.SkeletonImage
+import com.off.audioconverter.ui.components.SkeletonLine
 import com.off.audioconverter.ui.components.FloatingNavBar
 import com.off.audioconverter.ui.components.NavItem
 import com.off.audioconverter.ui.theme.OffTheme
@@ -769,11 +772,13 @@ private fun EditorScreen(
     var previewPlaying by remember { mutableStateOf(false) }
     var previewPositionMs by remember { mutableLongStateOf(0L) }
     var artwork by remember { mutableStateOf<ImageBitmap?>(null) }
+    var artworkResolved by remember { mutableStateOf(false) }
 
     // A real frame from the video, cropped 16:9 for the header card.
     LaunchedEffect(uri) {
         artwork = null
         val target = uri ?: return@LaunchedEffect
+        artworkResolved = false
         artwork = withContext(Dispatchers.IO) {
             runCatching {
                 val retriever = MediaMetadataRetriever()
@@ -783,7 +788,14 @@ private fun EditorScreen(
                 frame?.asImageBitmap()
             }.getOrNull()
         }
+        artworkResolved = true
     }
+
+    val frameAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (artwork != null) 1f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(420),
+        label = "frame-fade"
+    )
 
     DisposableEffect(uri) {
         if (uri != null) {
@@ -844,8 +856,10 @@ private fun EditorScreen(
                             bitmap = frame,
                             contentDescription = "Video frame",
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = frameAlpha }
                         )
+                    } else if (!artworkResolved) {
+                        SkeletonBox(Modifier.fillMaxSize(), RoundedCornerShape(16.dp))
                     } else {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(
@@ -1418,20 +1432,13 @@ private fun LibraryTrackCard(
                 color = MaterialTheme.colorScheme.secondaryContainer,
                 modifier = Modifier.size(48.dp)
             ) {
-                if (track.artworkUrl != null) {
-                    coil.compose.AsyncImage(
-                        model = track.artworkUrl,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.MusicNote,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(12.dp)
-                    )
-                }
+                SkeletonImage(
+                    model = track.artworkUrl,
+                    contentDescription = null,
+                    shape = MaterialTheme.shapes.large,
+                    fallback = Icons.Default.MusicNote,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
             Column(Modifier.weight(1f).clickable { onPlay() }) {
                 Text(track.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1577,7 +1584,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 3.7.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 3.8.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,
