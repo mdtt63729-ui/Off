@@ -32,3 +32,16 @@
   builds are not possible in this environment.
 - NewPipe Extractor, the JioSaavn mirror and YouTube itself are third-party and can change
   without notice. Download only content you are authorised to save.
+
+## v3.2.0 — lyrics and player
+- **Lyrics**: LRCLIB client (keyless, whole-line LRC) with title/artist cleaning so search titles
+  like "Song (feat. X) [Official Video]" still match. LRC parser handles `[mm:ss.xx]`, multiple
+  timestamps per line and `[offset:]`; line end times are inferred for the sweep.
+- **Lyrics UI + animation**: synced panel in the full player — active line lifted and brightened,
+  a karaoke wipe across the line driven by its own timing, auto-scroll keeping the active line
+  about a third down, and tap-a-line-to-seek.
+- **Full player**: Apple-Music/BitChord-style layout — artwork and lyrics share one slot and swap
+  with an animated transition, lyrics toggle, white components on a gradient backdrop.
+- **Mini player**: slimmed to the BitChord shape — small artwork, hairline progress along the
+  bottom edge, 40dp transport slots, swipe down to stop.
+- Player position now ticks at 200ms so the lyrics sweep stays smooth.

@@ -176,7 +176,7 @@ object PlayerController : Player.Listener {
                     val d = c.duration
                     _durationMs.value = if (d > 0) d else 0L
                 }
-                delay(500)
+                delay(200)
             }
         }
     }
