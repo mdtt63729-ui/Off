@@ -2,9 +2,7 @@ package com.off.audioconverter.player
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -12,6 +10,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,16 +27,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Equalizer
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -47,10 +55,12 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -73,6 +83,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.off.audioconverter.library.LibraryStore
 import com.off.audioconverter.lyrics.Lyrics
 import com.off.audioconverter.lyrics.LyricsRepository
 import com.off.audioconverter.lyrics.LyricsView
@@ -83,6 +94,8 @@ private fun formatMs(ms: Long): String {
     val total = (ms / 1000).coerceAtLeast(0)
     return "%d:%02d".format(total / 60, total % 60)
 }
+
+private enum class PlayerPane { ART, LYRICS, EQ, QUEUE }
 
 /**
  * Compact now-playing bar in the style BitChord uses: a slim row with small
@@ -184,7 +197,6 @@ fun MiniPlayer(
                         Icon(Icons.Default.SkipNext, contentDescription = "Next", modifier = Modifier.size(26.dp))
                     }
                 }
-                // Hairline progress along the bottom edge of the bar.
                 val progress = if (duration > 0) (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
                 LinearProgressIndicator(
                     progress = { progress },
@@ -243,16 +255,19 @@ private fun FullPlayerContent(
     val buffering by PlayerController.isBuffering.collectAsState()
     val hasNext by PlayerController.hasNext.collectAsState()
     val hasPrevious by PlayerController.hasPrevious.collectAsState()
+    val favourites by LibraryStore.favourites.collectAsState()
+    val queueTracks by PlayerController.queueTracks.collectAsState()
+    val queueIndex by PlayerController.queueIndex.collectAsState()
 
     var scrub by remember { mutableStateOf<Float?>(null) }
     val shown = scrub ?: position.toFloat()
 
     var collapseDrag by remember { mutableFloatStateOf(0f) }
-    var showLyrics by remember { mutableStateOf(false) }
+    var pane by remember { mutableStateOf(PlayerPane.ART) }
+    var showPlaylistDialog by remember { mutableStateOf(false) }
     var lyrics by remember { mutableStateOf(Lyrics.EMPTY) }
     var lyricsLoading by remember { mutableStateOf(false) }
 
-    // Fetch lyrics for whatever is playing, once per track.
     LaunchedEffect(track?.id) {
         val current = track
         if (current == null) {
@@ -264,6 +279,8 @@ private fun FullPlayerContent(
         lyrics = runCatching { LyricsRepository.fetch(current, hint) }.getOrDefault(Lyrics.EMPTY)
         lyricsLoading = false
     }
+
+    val isFavourite = track?.let { t -> favourites.any { it.id == t.id } } == true
 
     Box(
         modifier = Modifier
@@ -307,6 +324,16 @@ private fun FullPlayerContent(
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
+                IconButton(
+                    onClick = { track?.let { LibraryStore.toggleFavourite(it) } },
+                    enabled = track != null
+                ) {
+                    Icon(
+                        if (isFavourite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = if (isFavourite) "Remove from favourites" else "Add to favourites",
+                        tint = if (isFavourite) MaterialTheme.colorScheme.primary else Color.White
+                    )
+                }
                 IconButton(onClick = { track?.let(onDownload) }, enabled = track != null) {
                     Icon(
                         Icons.Default.Download,
@@ -318,34 +345,39 @@ private fun FullPlayerContent(
 
             Spacer(Modifier.weight(1f))
 
-            // Artwork and lyrics share the same slot and swap with an animation.
             Box(
                 modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                 contentAlignment = Alignment.Center
             ) {
                 AnimatedContent(
-                    targetState = showLyrics,
+                    targetState = pane,
                     transitionSpec = {
                         (fadeIn(tween(280)) + slideInVertically(tween(280)) { it / 12 }) togetherWith
                             (fadeOut(tween(180)) + slideOutVertically(tween(180)) { -it / 12 })
                     },
-                    label = "artwork-lyrics"
-                ) { lyricsMode ->
-                    if (lyricsMode) {
-                        LyricsView(
+                    label = "player-pane"
+                ) { current ->
+                    when (current) {
+                        PlayerPane.ART -> ArtworkPane(track)
+                        PlayerPane.LYRICS -> LyricsView(
                             lyrics = lyrics,
                             positionMs = position,
                             loading = lyricsLoading,
                             onSeek = { PlayerController.seekTo(it) },
                             modifier = Modifier.fillMaxSize()
                         )
-                    } else {
-                        ArtworkPane(track = track)
+                        PlayerPane.EQ -> EqualizerPane(Modifier.fillMaxSize())
+                        PlayerPane.QUEUE -> QueuePane(
+                            tracks = queueTracks,
+                            currentIndex = queueIndex,
+                            onPlay = { PlayerController.playAt(it) },
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
                 }
             }
 
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(20.dp))
 
             Text(
                 track?.title ?: "Nothing playing",
@@ -365,7 +397,7 @@ private fun FullPlayerContent(
                 overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(16.dp))
 
             Slider(
                 value = shown.coerceIn(0f, duration.toFloat().coerceAtLeast(1f)),
@@ -387,7 +419,7 @@ private fun FullPlayerContent(
                 Text(formatMs(duration), style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.7f))
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -437,37 +469,69 @@ private fun FullPlayerContent(
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                PaneToggle(PlayerPane.LYRICS, pane, Icons.Default.Lyrics, "Lyrics") { pane = it }
+                Spacer(Modifier.width(8.dp))
+                PaneToggle(PlayerPane.EQ, pane, Icons.Default.Equalizer, "Equalizer") { pane = it }
+                Spacer(Modifier.width(8.dp))
+                PaneToggle(PlayerPane.QUEUE, pane, Icons.Default.QueueMusic, "Queue") { pane = it }
+                Spacer(Modifier.width(8.dp))
                 FilledTonalIconButton(
-                    onClick = { showLyrics = !showLyrics },
+                    onClick = { showPlaylistDialog = true },
+                    enabled = track != null,
                     colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = if (showLyrics) Color.White else Color.White.copy(alpha = 0.12f),
-                        contentColor = if (showLyrics) MaterialTheme.colorScheme.onPrimary else Color.White
+                        containerColor = Color.White.copy(alpha = 0.12f),
+                        contentColor = Color.White
                     )
                 ) {
-                    Icon(Icons.Default.Lyrics, contentDescription = if (showLyrics) "Hide lyrics" else "Show lyrics")
+                    Icon(Icons.Default.PlaylistAdd, contentDescription = "Add to playlist")
                 }
-                Spacer(Modifier.width(12.dp))
-                track?.let {
-                    Surface(shape = RoundedCornerShape(14.dp), color = Color.White.copy(alpha = 0.12f)) {
-                        Text(
-                            "Source · ${it.source.label}" + (it.bitrateKbps?.let { q -> " · ${q}kbps" } ?: ""),
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                            color = Color.White
-                        )
-                    }
-                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            track?.let {
+                Text(
+                    "Source · ${it.source.label}" + (it.bitrateKbps?.let { q -> " · ${q}kbps" } ?: ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.55f)
+                )
             }
 
             Spacer(Modifier.weight(1f))
         }
+    }
+
+    if (showPlaylistDialog) {
+        track?.let { t ->
+            AddToPlaylistDialog(track = t, onDismiss = { showPlaylistDialog = false })
+        }
+    }
+}
+
+@Composable
+private fun PaneToggle(
+    target: PlayerPane,
+    current: PlayerPane,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onSelect: (PlayerPane) -> Unit
+) {
+    val active = current == target
+    FilledTonalIconButton(
+        onClick = { onSelect(if (active) PlayerPane.ART else target) },
+        colors = IconButtonDefaults.filledTonalIconButtonColors(
+            containerColor = if (active) Color.White else Color.White.copy(alpha = 0.12f),
+            contentColor = if (active) MaterialTheme.colorScheme.onPrimary else Color.White
+        )
+    ) {
+        Icon(icon, contentDescription = label)
     }
 }
 
@@ -497,4 +561,136 @@ private fun ArtworkPane(track: Track?) {
             }
         }
     }
+}
+
+@Composable
+private fun QueuePane(
+    tracks: List<Track>,
+    currentIndex: Int,
+    onPlay: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (tracks.isEmpty()) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text(
+                "The queue is empty.",
+                color = Color.White.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        return
+    }
+    Column(modifier) {
+        Text(
+            "Up next · ${tracks.size} in queue",
+            color = Color.White.copy(alpha = 0.6f),
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            itemsIndexed(tracks) { index, item ->
+                val isCurrent = index == currentIndex
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isCurrent) Color.White.copy(alpha = 0.14f) else Color.Transparent)
+                        .clickable { onPlay(index) }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.White.copy(alpha = 0.10f),
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        if (item.artworkUrl != null) {
+                            AsyncImage(model = item.artworkUrl, contentDescription = null, modifier = Modifier.fillMaxSize())
+                        } else {
+                            Icon(
+                                Icons.Default.MusicNote,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(9.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            item.title,
+                            color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.White,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            item.artist,
+                            color = Color.White.copy(alpha = 0.6f),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AddToPlaylistDialog(track: Track, onDismiss: () -> Unit) {
+    val playlists by LibraryStore.playlists.collectAsState()
+    var newName by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add to playlist") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(track.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (playlists.isEmpty()) {
+                    Text("No playlists yet — create one below.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    playlists.forEach { playlist ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    LibraryStore.addToPlaylist(playlist.name, track)
+                                    onDismiss()
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(playlist.name, modifier = Modifier.weight(1f))
+                            Text("${playlist.tracks.size}", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("New playlist") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val name = newName.trim()
+                    if (name.isNotEmpty()) {
+                        LibraryStore.createPlaylist(name)
+                        LibraryStore.addToPlaylist(name, track)
+                    }
+                    onDismiss()
+                },
+                enabled = newName.trim().isNotEmpty()
+            ) { Text("Create & add") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+    )
 }

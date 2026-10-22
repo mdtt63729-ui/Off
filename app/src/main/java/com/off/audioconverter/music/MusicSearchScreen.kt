@@ -27,6 +27,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
@@ -35,6 +40,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledIconButton
@@ -70,6 +77,8 @@ import com.off.audioconverter.download.DownloadService
 import com.off.audioconverter.download.DownloadStatus
 import com.off.audioconverter.download.DownloadStore
 import com.off.audioconverter.download.DownloadTask
+import com.off.audioconverter.library.LibraryStore
+import com.off.audioconverter.player.AddToPlaylistDialog
 import com.off.audioconverter.player.PlayerController
 import com.off.audioconverter.ui.SettingsStore
 import kotlinx.coroutines.delay
@@ -364,6 +373,15 @@ private fun TrackRow(
 ) {
     val busy = task != null && DownloadStore.isActive(task.status)
     val done = task?.status == DownloadStatus.COMPLETED
+    val favourites by LibraryStore.favourites.collectAsState()
+    val isFavourite = favourites.any { it.id == track.id }
+    var menuOpen by remember { mutableStateOf(false) }
+    var showPlaylist by remember { mutableStateOf(false) }
+
+    if (showPlaylist) {
+        AddToPlaylistDialog(track = track, onDismiss = { showPlaylist = false })
+    }
+
     ElevatedCard(Modifier.fillMaxWidth()) {
         Column {
             Row(
@@ -400,6 +418,38 @@ private fun TrackRow(
                         busy -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                         done -> Icon(Icons.Default.DownloadDone, contentDescription = "Downloaded")
                         else -> Icon(Icons.Default.Download, contentDescription = "Download ${track.title}")
+                    }
+                }
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(if (isFavourite) "Remove favourite" else "Favourite") },
+                            leadingIcon = {
+                                Icon(
+                                    if (isFavourite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = { menuOpen = false; LibraryStore.toggleFavourite(track) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add to playlist") },
+                            leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
+                            onClick = { menuOpen = false; showPlaylist = true }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Play next") },
+                            leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                            onClick = { menuOpen = false; PlayerController.playNext(track) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add to queue") },
+                            leadingIcon = { Icon(Icons.Default.QueueMusic, contentDescription = null) },
+                            onClick = { menuOpen = false; PlayerController.addToQueue(track) }
+                        )
                     }
                 }
             }

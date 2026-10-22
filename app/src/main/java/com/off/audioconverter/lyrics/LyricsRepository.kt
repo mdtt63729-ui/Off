@@ -61,7 +61,6 @@ object LyricsRepository {
         val candidates = (0 until array.length()).mapNotNull { array.optJSONObject(it) }
         if (candidates.isEmpty()) return null
 
-        // Prefer a synced answer, then the closest duration.
         val best = candidates
             .sortedWith(
                 compareByDescending<JSONObject> { !it.optString("syncedLyrics", "").isNullOrBlank() }
@@ -92,7 +91,6 @@ object LyricsRepository {
         connection.readTimeout = 15000
         connection.requestMethod = "GET"
         connection.setRequestProperty("Accept", "application/json")
-        // LRCLIB asks callers to identify themselves.
         connection.setRequestProperty("User-Agent", USER_AGENT)
         return try {
             val code = connection.responseCode
@@ -115,5 +113,5 @@ object LyricsRepository {
     private fun enc(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name())
 
     private const val BASE = "https://lrclib.net"
-    private const val USER_AGENT = "Off-Android/3.2.0 (https://github.com/mdtt63729-ui/Off)"
+    private const val USER_AGENT = "Off-Android/3.3.0 (https://github.com/mdtt63729-ui/Off)"
 }

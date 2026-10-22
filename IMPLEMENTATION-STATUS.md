@@ -33,15 +33,17 @@
 - NewPipe Extractor, the JioSaavn mirror and YouTube itself are third-party and can change
   without notice. Download only content you are authorised to save.
 
-## v3.2.0 — lyrics and player
-- **Lyrics**: LRCLIB client (keyless, whole-line LRC) with title/artist cleaning so search titles
-  like "Song (feat. X) [Official Video]" still match. LRC parser handles `[mm:ss.xx]`, multiple
-  timestamps per line and `[offset:]`; line end times are inferred for the sweep.
-- **Lyrics UI + animation**: synced panel in the full player — active line lifted and brightened,
-  a karaoke wipe across the line driven by its own timing, auto-scroll keeping the active line
-  about a third down, and tap-a-line-to-seek.
-- **Full player**: Apple-Music/BitChord-style layout — artwork and lyrics share one slot and swap
-  with an animated transition, lyrics toggle, white components on a gradient backdrop.
-- **Mini player**: slimmed to the BitChord shape — small artwork, hairline progress along the
-  bottom edge, 40dp transport slots, swipe down to stop.
-- Player position now ticks at 200ms so the lyrics sweep stays smooth.
+## v3.3.0 — library, queue and equalizer
+- **Favourites**: heart in the full player and on every search result; persisted.
+- **Playlists**: create, add, remove, delete; "Add to playlist" in the player and the search menu;
+  playlist detail with "Play all". Persisted.
+- **Persistent queue**: the queue and current index are saved, so the last track comes back ready
+  (paused) after the app is closed. "Play next" and "Add to queue" from the search menu, plus a
+  queue pane in the full player.
+- **Equalizer**: Android's own Equalizer effect attached to the player's audio session, with a
+  pane in the full player (band sliders + presets). Hides itself if the device offers no session.
+- **Library** screen now has Favourites / Playlists / Files tabs.
+- **CI signing**: the workflow signs the release APK when KEYSTORE_BASE64 / KEYSTORE_PASSWORD /
+  KEY_PASSWORD / KEY_ALIAS secrets are set, and uploads both signed and unsigned artifacts.
+- (v3.2.0) Synced lyrics from LRCLIB with the karaoke line sweep, and the BitChord-style
+  full-screen and mini players.

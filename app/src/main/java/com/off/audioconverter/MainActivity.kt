@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Search
@@ -127,7 +128,10 @@ import com.off.audioconverter.download.DownloadService
 import com.off.audioconverter.download.DownloadStatus
 import com.off.audioconverter.download.DownloadStore
 import com.off.audioconverter.download.DownloadTask
+import com.off.audioconverter.library.LibraryStore
+import com.off.audioconverter.library.Playlist
 import com.off.audioconverter.music.MusicRepository
+import com.off.audioconverter.music.Track
 import com.off.audioconverter.music.MusicSearchScreen
 import com.off.audioconverter.player.FullPlayerOverlay
 import com.off.audioconverter.player.MiniPlayer
@@ -199,7 +203,10 @@ private fun OffApp() {
 
     fun persistHistory() = saveHistory(context, history)
 
-    LaunchedEffect(Unit) { PlayerController.connect(context) }
+    LaunchedEffect(Unit) {
+        LibraryStore.init(context)
+        PlayerController.connect(context)
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -898,9 +905,14 @@ private fun LibraryScreen(
     onClearDownloads: () -> Unit
 ) {
     val context = LocalContext.current
+    val favourites by LibraryStore.favourites.collectAsState()
+    val playlists by LibraryStore.playlists.collectAsState()
     val downloads by DownloadStore.tasks.collectAsState()
     val finished = downloads.filter { it.status == DownloadStatus.COMPLETED || it.status == DownloadStatus.FAILED }
     val active = downloads.filter { DownloadStore.isActive(it.status) }
+
+    var tab by remember { mutableIntStateOf(0) }
+    var openPlaylistName by remember { mutableStateOf<String?>(null) }
 
     Column(
         Modifier
@@ -910,75 +922,293 @@ private fun LibraryScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        if (active.isNotEmpty()) {
-            Text("Downloading", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            active.forEach { task ->
-                DownloadRow(
-                    task = task,
-                    onOpen = {},
-                    onPauseResume = {
-                        if (task.status == DownloadStatus.PAUSED) DownloadService.resume(context)
-                        else DownloadService.pause(context)
-                    },
-                    onCancel = { DownloadService.cancel(context) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("Favourites", "Playlists", "Files").forEachIndexed { index, label ->
+                FilterChip(
+                    selected = tab == index,
+                    onClick = { tab = index; openPlaylistName = null },
+                    label = { Text(label) }
                 )
             }
         }
 
-        if (finished.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        val openPlaylist = playlists.firstOrNull { it.name == openPlaylistName }
+        if (openPlaylist != null) {
+            PlaylistDetail(
+                playlist = openPlaylist,
+                onBack = { openPlaylistName = null },
+                onDelete = {
+                    LibraryStore.deletePlaylist(openPlaylist.name)
+                    openPlaylistName = null
+                }
+            )
+        } else when (tab) {
+            0 -> {
+                if (favourites.isEmpty()) {
+                    LibraryEmptyHint(
+                        title = "No favourites yet",
+                        body = "Tap the heart on a track in the player or in search to keep it here."
+                    )
+                } else {
+                    SectionLabel("${favourites.size} favourite${if (favourites.size == 1) "" else "s"}")
+                    favourites.forEachIndexed { index, track ->
+                        LibraryTrackCard(
+                            track = track,
+                            onPlay = { PlayerController.playQueue(favourites, index) },
+                            onRemove = { LibraryStore.toggleFavourite(track) }
+                        )
+                    }
+                }
+            }
+            1 -> {
+                if (playlists.isEmpty()) {
+                    LibraryEmptyHint(
+                        title = "No playlists yet",
+                        body = "Use “Add to playlist” in the player, or the menu on any search result."
+                    )
+                } else {
+                    playlists.forEach { playlist ->
+                        Card(modifier = Modifier.fillMaxWidth().clickable { openPlaylistName = playlist.name }) {
+                            Row(
+                                Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Surface(
+                                    shape = MaterialTheme.shapes.large,
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.QueueMusic,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.padding(12.dp)
+                                    )
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(playlist.name, style = MaterialTheme.typography.titleSmall)
+                                    Text(
+                                        "${playlist.tracks.size} track${if (playlist.tracks.size == 1) "" else "s"}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(onClick = { LibraryStore.deletePlaylist(playlist.name) }) {
+                                    Icon(Icons.Default.DeleteOutline, contentDescription = "Delete playlist")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            else -> {
+                if (active.isNotEmpty()) {
+                    SectionLabel("Downloading")
+                    active.forEach { task ->
+                        DownloadRow(
+                            task = task,
+                            onOpen = {},
+                            onPauseResume = {
+                                if (task.status == DownloadStatus.PAUSED) DownloadService.resume(context)
+                                else DownloadService.pause(context)
+                            },
+                            onCancel = { DownloadService.cancel(context) }
+                        )
+                    }
+                }
+
+                if (finished.isNotEmpty()) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        SectionLabel(
+                            "${finished.size} in this session",
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedButton(onClick = onClearDownloads) { Text("Clear list") }
+                    }
+                    finished.forEach { task ->
+                        DownloadRow(
+                            task = task,
+                            onOpen = { task.savedUri?.let(onOpenUri) },
+                            onPauseResume = null,
+                            onCancel = null
+                        )
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                }
+
+                if (items.isEmpty() && finished.isEmpty() && active.isEmpty()) {
+                    LibraryEmptyHint(
+                        title = "Your library is waiting",
+                        body = "Downloaded songs, favourites and saved conversions appear here."
+                    )
+                }
+
+                if (items.isNotEmpty()) {
+                    SectionLabel("${items.size} saved ${if (items.size == 1) "track" else "tracks"}")
+                    items.forEach { item ->
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Surface(
+                                    shape = MaterialTheme.shapes.large,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.AudioFile,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(12.dp)
+                                    )
+                                }
+                                Column(Modifier.weight(1f).clickable { onOpen(item) }) {
+                                    Text(item.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(
+                                        "${formatBytes(item.bytes)} · ${java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(item.createdAt))}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(onClick = { onShare(item) }) {
+                                    Icon(Icons.Default.Share, contentDescription = "Share ${item.name}")
+                                }
+                                IconButton(onClick = { onDelete(item) }) {
+                                    Icon(Icons.Default.DeleteOutline, contentDescription = "Delete ${item.name}")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        modifier = modifier,
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+@Composable
+private fun LibraryEmptyHint(title: String, body: String) {
+    Column(
+        Modifier.fillMaxWidth().padding(28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            Icons.Default.LibraryMusic,
+            contentDescription = null,
+            modifier = Modifier.size(64.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(
+            body,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun LibraryTrackCard(
+    track: Track,
+    onPlay: () -> Unit,
+    onRemove: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.size(48.dp)
+            ) {
+                if (track.artworkUrl != null) {
+                    coil.compose.AsyncImage(
+                        model = track.artworkUrl,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.MusicNote,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+            Column(Modifier.weight(1f).clickable { onPlay() }) {
+                Text(track.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${finished.size} in this session",
-                    style = MaterialTheme.typography.titleMedium,
+                    track.artist,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedButton(onClick = onClearDownloads) { Text("Clear list") }
-            }
-            finished.forEach { task ->
-                DownloadRow(
-                    task = task,
-                    onOpen = { task.savedUri?.let(onOpenUri) },
-                    onPauseResume = null,
-                    onCancel = null
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            HorizontalDivider(Modifier.padding(vertical = 6.dp))
+            IconButton(onClick = onPlay) {
+                Icon(Icons.Default.PlayArrow, contentDescription = "Play ${track.title}")
+            }
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Default.DeleteOutline, contentDescription = "Remove ${track.title}")
+            }
         }
+    }
+}
 
-        if (items.isEmpty() && finished.isEmpty() && active.isEmpty()) {
-            Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.LibraryMusic, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(16.dp))
-                Text("Your library is waiting", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+@Composable
+private fun PlaylistDetail(
+    playlist: Playlist,
+    onBack: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+            Column(Modifier.weight(1f)) {
+                Text(playlist.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "Downloaded songs and saved conversions appear here.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    "${playlist.tracks.size} track${if (playlist.tracks.size == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            Button(
+                onClick = { PlayerController.playQueue(playlist.tracks, 0) },
+                enabled = playlist.tracks.isNotEmpty()
+            ) { Text("Play all") }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Default.DeleteOutline, contentDescription = "Delete playlist")
+            }
         }
-
-        if (items.isNotEmpty()) {
-            Text("${items.size} saved ${if (items.size == 1) "track" else "tracks"}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            items.forEach { item ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.Default.AudioFile, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.padding(12.dp))
-                        }
-                        Column(Modifier.weight(1f).clickable { onOpen(item) }) {
-                            Text(item.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                "${formatBytes(item.bytes)} · ${java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(item.createdAt))}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        IconButton(onClick = { onShare(item) }) { Icon(Icons.Default.Share, contentDescription = "Share ${item.name}") }
-                        IconButton(onClick = { onDelete(item) }) { Icon(Icons.Default.DeleteOutline, contentDescription = "Delete ${item.name}") }
-                    }
-                }
+        if (playlist.tracks.isEmpty()) {
+            LibraryEmptyHint("Empty playlist", "Add tracks to it from the player or from search.")
+        } else {
+            playlist.tracks.forEachIndexed { index, track ->
+                LibraryTrackCard(
+                    track = track,
+                    onPlay = { PlayerController.playQueue(playlist.tracks, index) },
+                    onRemove = { LibraryStore.removeFromPlaylist(playlist.name, track.id) }
+                )
             }
         }
     }
@@ -1067,7 +1297,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 3.2.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 3.3.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

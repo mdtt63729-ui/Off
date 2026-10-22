@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -107,7 +106,6 @@ private fun SyncedLyrics(
         if (activeIndex >= 0 && lyrics.synced) {
             val viewport = listState.layoutInfo.viewportSize.height
             val offset = if (viewport > 0) -(viewport / 3) else 0
-            // +1 for the leading spacer item that lets the first line centre.
             runCatching { listState.animateScrollToItem(activeIndex + 1, offset) }
         }
     }
@@ -174,10 +172,8 @@ private fun LyricRow(
                 transformOrigin = TransformOrigin(0f, 0.5f)
             }
     ) {
-        // Dim base copy — always fully drawn.
         Text(text, color = baseColor, style = style, fontWeight = weight)
 
-        // Bright copy, clipped to how much of the line has been sung.
         if (isActive) {
             Text(
                 text,
