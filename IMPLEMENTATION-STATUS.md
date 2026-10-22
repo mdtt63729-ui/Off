@@ -60,3 +60,16 @@
   `Movies/Off`.
 - New `video` package: `VideoModels`, `PipedApi`, `VideoRepository`, `VideoDownloadService`,
   `VideoDownloadScreen`.
+
+## v3.5.0 — text colour, real-time editor
+- **Fixed: every Text without an explicit colour rendered black.** Replacing Scaffold with a plain
+  Box in v3.1 dropped the Surface that sets `LocalContentColor`, so headings ("Make audio your
+  own.", "Recent searches", "No favourites yet", "Download a video", "Volume · 100%") were black
+  on black. `OffTheme` now wraps the app in a Surface with `contentColor = onBackground`.
+- **Editor is now a real editor**: a live preview player (ExoPlayer) bound to the selected video.
+  Play/pause, and speed and volume are applied to the running player as you move the sliders, so
+  you hear the change immediately. The trim range is enforced during preview (it loops inside it).
+- **Real waveform**: FFmpeg renders the actual peaks (`showwavespic`) to a PNG the editor shows,
+  instead of the placeholder bars (kept as a fallback).
+- **Page padding**: pages without the navigation bar no longer reserve its height, so the editor
+  is not cut off and does not end in a large empty gap.

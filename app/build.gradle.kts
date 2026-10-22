@@ -12,8 +12,8 @@ android {
         applicationId = "com.off.audioconverter"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "3.4.0"
+        versionCode = 10
+        versionName = "3.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }

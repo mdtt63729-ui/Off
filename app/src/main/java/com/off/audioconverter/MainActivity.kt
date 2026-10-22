@@ -32,6 +32,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -82,11 +83,13 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -99,6 +102,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -115,7 +120,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -142,7 +149,14 @@ import com.off.audioconverter.video.VideoDownloadScreen
 import com.off.audioconverter.ui.components.FloatingNavBar
 import com.off.audioconverter.ui.components.NavItem
 import com.off.audioconverter.ui.theme.OffTheme
+import android.graphics.BitmapFactory
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import com.off.audioconverter.conversion.WaveformGenerator
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -201,6 +215,8 @@ private fun OffApp() {
     var showDeleteDialog by remember { mutableStateOf<SavedAudio?>(null) }
     var showDeleteCurrent by remember { mutableStateOf(false) }
     var reducedMotion by remember { mutableStateOf(settings.reducedMotion) }
+    var waveformPath by remember { mutableStateOf<String?>(null) }
+    var waveformLoading by remember { mutableStateOf(false) }
     val history = remember { mutableStateListOf<SavedAudio>().apply { addAll(loadHistory(context)) } }
 
     fun persistHistory() = saveHistory(context, history)
@@ -208,6 +224,16 @@ private fun OffApp() {
     LaunchedEffect(Unit) {
         LibraryStore.init(context)
         PlayerController.connect(context)
+    }
+
+    // Draw a real waveform for whatever video is selected.
+    LaunchedEffect(selectedUri) {
+        val current = selectedUri
+        waveformPath = null
+        if (current == null) return@LaunchedEffect
+        waveformLoading = true
+        waveformPath = WaveformGenerator.generate(context, current, context.cacheDir)?.absolutePath
+        waveformLoading = false
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -234,7 +260,12 @@ private fun OffApp() {
     val navBarBottom: Dp = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val topPad: Dp = statusBarTop + 74.dp
     val bottomPad: Dp = navBarBottom + 176.dp
-    val contentPadding = PaddingValues(top = topPad, bottom = bottomPad)
+    // Pages that show the navigation bar need room for it; the others only need
+    // room for the floating mini player, so they are not left with a big gap.
+    val contentPadding = PaddingValues(
+        top = topPad,
+        bottom = if (page in BOTTOM_PAGES) bottomPad else navBarBottom + 104.dp
+    )
 
     val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -359,6 +390,9 @@ private fun OffApp() {
                 OffPage.VIDEO -> VideoDownloadScreen(contentPadding = contentPadding)
                 OffPage.EDITOR -> EditorScreen(
                     contentPadding = contentPadding,
+                    uri = selectedUri,
+                    waveformPath = waveformPath,
+                    waveformLoading = waveformLoading,
                     name = selectedName ?: "Selected video",
                     duration = durationSec,
                     bitrate = bitrate,
@@ -721,13 +755,63 @@ private fun HomeScreen(
 @Composable
 private fun EditorScreen(
     contentPadding: PaddingValues,
+    uri: Uri?,
+    waveformPath: String?,
+    waveformLoading: Boolean,
     name: String, duration: Int, bitrate: Int, onBitrate: (Int) -> Unit,
     trimStart: Float, onTrimStart: (Float) -> Unit, trimEnd: Float, onTrimEnd: (Float) -> Unit,
     speed: Float, onSpeed: (Float) -> Unit, fadeIn: Float, onFadeIn: (Float) -> Unit,
     fadeOut: Float, onFadeOut: (Float) -> Unit, volume: Float, onVolume: (Float) -> Unit,
     onBack: () -> Unit, onExport: () -> Unit
 ) {
+    val context = LocalContext.current
     val maxDuration = duration.coerceAtLeast(1).toFloat()
+
+    // ---- live preview: the controls act on what you hear, immediately ----
+    val previewPlayer = remember { ExoPlayer.Builder(context).build() }
+    var previewPlaying by remember { mutableStateOf(false) }
+    var previewPositionMs by remember { mutableLongStateOf(0L) }
+
+    DisposableEffect(uri) {
+        if (uri != null) {
+            previewPlayer.setMediaItem(MediaItem.fromUri(uri))
+            previewPlayer.prepare()
+        }
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                previewPlaying = isPlaying
+            }
+        }
+        previewPlayer.addListener(listener)
+        onDispose {
+            previewPlayer.removeListener(listener)
+            previewPlayer.release()
+        }
+    }
+
+    // Speed and volume apply to the running player as the sliders move.
+    LaunchedEffect(speed) { previewPlayer.setPlaybackParameters(PlaybackParameters(speed)) }
+    LaunchedEffect(volume) { previewPlayer.volume = volume.coerceIn(0f, 1.5f) }
+
+    // Keep the position readout fresh and loop inside the selected trim range.
+    LaunchedEffect(uri) {
+        while (true) {
+            previewPositionMs = previewPlayer.currentPosition.coerceAtLeast(0L)
+            val startMs = (trimStart * 1000).toLong()
+            val endMs = (trimEnd * 1000).toLong()
+            if (previewPlaying && endMs > startMs && previewPositionMs >= endMs) {
+                previewPlayer.seekTo(startMs)
+            }
+            delay(120)
+        }
+    }
+
+    val waveformBitmap = remember(waveformPath) {
+        waveformPath?.let { path ->
+            runCatching { BitmapFactory.decodeFile(path)?.asImageBitmap() }.getOrNull()
+        }
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -747,7 +831,89 @@ private fun EditorScreen(
                         Text("${formatTime(duration)} · Source stays on device", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                WaveformPreview()
+
+                // Real waveform, drawn from the audio itself.
+                when {
+                    waveformBitmap != null -> Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(78.dp)
+                            .clip(MaterialTheme.shapes.large)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    ) {
+                        Image(
+                            bitmap = waveformBitmap,
+                            contentDescription = "Audio waveform",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.FillBounds
+                        )
+                    }
+                    waveformLoading -> Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(78.dp)
+                            .clip(MaterialTheme.shapes.large)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                    }
+                    else -> WaveformPreview()
+                }
+
+                // Transport: hear the trim, speed and volume before exporting.
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    FilledIconButton(
+                        onClick = {
+                            if (previewPlaying) {
+                                previewPlayer.pause()
+                            } else {
+                                val startMs = (trimStart * 1000).toLong()
+                                val endMs = (trimEnd * 1000).toLong()
+                                val position = previewPlayer.currentPosition
+                                if (position < startMs || (endMs > startMs && position >= endMs)) {
+                                    previewPlayer.seekTo(startMs)
+                                }
+                                previewPlayer.play()
+                            }
+                        },
+                        enabled = uri != null,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    ) {
+                        Icon(
+                            if (previewPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (previewPlaying) "Pause preview" else "Play preview"
+                        )
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (previewPlaying) "Previewing your edits" else "Preview",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            "${formatTime((previewPositionMs / 1000).toInt())} / ${formatTime(trimEnd.toInt())} · ${"%.2f".format(speed)}× · ${(volume * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { previewPlayer.seekTo((trimStart * 1000).toLong()) },
+                        enabled = uri != null
+                    ) { Text("Start") }
+                }
+                Text(
+                    "Play to hear it: speed, volume and the trim range are applied live, so you can tune before exporting.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
                 Text("Trim range", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text("Start · ${formatTime(trimStart.toInt())}", style = MaterialTheme.typography.bodyMedium)
                 Slider(
@@ -764,6 +930,7 @@ private fun EditorScreen(
                 Text("Selected length: ${formatTime((trimEnd - trimStart).toInt().coerceAtLeast(0))}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
             }
         }
+
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Export quality", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -793,23 +960,6 @@ private fun EditorScreen(
         }
     }
 }
-
-/** Bitrate chip with a springy pop when selected. */
-@Composable
-private fun AnimatedBitrateChip(kbps: Int, selected: Boolean, onSelect: () -> Unit) {
-    val scale by animateFloatAsState(
-        targetValue = if (selected) 1.08f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        label = "bitrate-scale"
-    )
-    FilterChip(
-        selected = selected,
-        onClick = onSelect,
-        label = { Text("$kbps") },
-        modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale }
-    )
-}
-
 @Composable
 private fun WaveformPreview() {
     Canvas(Modifier.fillMaxWidth().height(76.dp).clip(MaterialTheme.shapes.large)) {
@@ -1302,7 +1452,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 3.4.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 3.5.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

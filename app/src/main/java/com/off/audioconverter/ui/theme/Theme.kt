@@ -1,12 +1,15 @@
 package com.off.audioconverter.ui.theme
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -121,7 +124,17 @@ fun OffTheme(
     MaterialTheme(
         colorScheme = if (darkTheme) OffDarkColors else OffLightColors,
         typography = OffTypography,
-        shapes = OffShapes,
-        content = content
-    )
+        shapes = OffShapes
+    ) {
+        // MaterialTheme sets no content colour of its own, and a plain Box leaves
+        // LocalContentColor at its default — black. Every Text without an explicit
+        // colour then rendered black on the dark background and was invisible.
+        // A Surface fixes it for the whole app by setting onBackground.
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+            contentColor = MaterialTheme.colorScheme.onBackground,
+            content = content
+        )
+    }
 }
