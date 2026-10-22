@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.QueueMusic
@@ -137,6 +138,7 @@ import com.off.audioconverter.player.FullPlayerOverlay
 import com.off.audioconverter.player.MiniPlayer
 import com.off.audioconverter.player.PlayerController
 import com.off.audioconverter.ui.SettingsStore
+import com.off.audioconverter.video.VideoDownloadScreen
 import com.off.audioconverter.ui.components.FloatingNavBar
 import com.off.audioconverter.ui.components.NavItem
 import com.off.audioconverter.ui.theme.OffTheme
@@ -149,10 +151,10 @@ import java.io.File
 import java.io.FileInputStream
 import java.util.UUID
 
-private enum class OffPage { HOME, SEARCH, LIBRARY, EDITOR, PROGRESS, RESULT, SETTINGS }
+private enum class OffPage { HOME, SEARCH, VIDEO, LIBRARY, EDITOR, PROGRESS, RESULT, SETTINGS }
 private data class SavedAudio(val id: String, val name: String, val uri: String, val createdAt: Long, val bytes: Long)
 
-private val BOTTOM_PAGES = listOf(OffPage.HOME, OffPage.SEARCH, OffPage.LIBRARY)
+private val BOTTOM_PAGES = listOf(OffPage.HOME, OffPage.SEARCH, OffPage.VIDEO, OffPage.LIBRARY)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -354,6 +356,7 @@ private fun OffApp() {
                 OffPage.SEARCH -> MusicSearchScreen(
                     modifier = Modifier.padding(contentPadding)
                 )
+                OffPage.VIDEO -> VideoDownloadScreen(contentPadding = contentPadding)
                 OffPage.EDITOR -> EditorScreen(
                     contentPadding = contentPadding,
                     name = selectedName ?: "Selected video",
@@ -517,6 +520,7 @@ private fun OffApp() {
                         Text(
                             when (page) {
                                 OffPage.SEARCH -> "Search · Saavn + YouTube"
+                                OffPage.VIDEO -> "Download a video"
                                 OffPage.EDITOR -> "Audio editor"
                                 OffPage.PROGRESS -> "Export studio"
                                 OffPage.RESULT -> "Your audio is ready"
@@ -574,6 +578,7 @@ private fun OffApp() {
                     items = listOf(
                         NavItem("Studio", Icons.Default.Home),
                         NavItem("Search", Icons.Default.Search),
+                        NavItem("Video", Icons.Default.Movie),
                         NavItem("Library", Icons.Default.LibraryMusic)
                     ),
                     selectedIndex = BOTTOM_PAGES.indexOf(page).coerceAtLeast(0),
@@ -1297,7 +1302,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 3.3.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 3.4.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

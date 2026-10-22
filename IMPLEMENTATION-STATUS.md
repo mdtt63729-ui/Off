@@ -47,3 +47,16 @@
   KEY_PASSWORD / KEY_ALIAS secrets are set, and uploads both signed and unsigned artifacts.
 - (v3.2.0) Synced lyrics from LRCLIB with the karaoke line sweep, and the BitChord-style
   full-screen and mini players.
+
+## v3.4.0 — download video from a link
+- **New "Video" tab**: paste a YouTube link (watch / youtu.be / shorts / live / embed, or a bare
+  id) and download it.
+- **Resolution**: NewPipe Extractor locally first, with the **Piped API** (the backend LibreTube
+  is built on, several community instances tried in order) as the fallback.
+- **Muxed renditions** (already contain audio) are saved straight out. **Video-only** renditions
+  are paired with the best audio stream and joined with FFmpeg — `-c copy` first, and if the
+  containers disagree it re-encodes just the audio to AAC.
+- **Progress notification** in the status bar with a Cancel action; finished videos land in
+  `Movies/Off`.
+- New `video` package: `VideoModels`, `PipedApi`, `VideoRepository`, `VideoDownloadService`,
+  `VideoDownloadScreen`.
