@@ -960,6 +960,22 @@ private fun EditorScreen(
         }
     }
 }
+/** Bitrate chip with a springy pop when selected. */
+@Composable
+private fun AnimatedBitrateChip(kbps: Int, selected: Boolean, onSelect: () -> Unit) {
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.08f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "bitrate-scale"
+    )
+    FilterChip(
+        selected = selected,
+        onClick = onSelect,
+        label = { Text("$kbps") },
+        modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale }
+    )
+}
+
 @Composable
 private fun WaveformPreview() {
     Canvas(Modifier.fillMaxWidth().height(76.dp).clip(MaterialTheme.shapes.large)) {
