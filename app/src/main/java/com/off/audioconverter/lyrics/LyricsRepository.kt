@@ -114,8 +114,6 @@ object LyricsRepository {
 
     private fun enc(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name())
 
-    private companion object {
-        const val BASE = "https://lrclib.net"
-        const val USER_AGENT = "Off-Android/3.2.0 (https://github.com/mdtt63729-ui/Off)"
-    }
+    private const val BASE = "https://lrclib.net"
+    private const val USER_AGENT = "Off-Android/3.2.0 (https://github.com/mdtt63729-ui/Off)"
 }
