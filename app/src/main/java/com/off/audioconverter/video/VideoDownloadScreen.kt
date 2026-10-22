@@ -345,9 +345,9 @@ fun VideoDownloadScreen(
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(28.dp)
                     )
-                    Text("Any YouTube link works", fontWeight = FontWeight.SemiBold)
+                    Text("Paste any supported link", fontWeight = FontWeight.SemiBold)
                     Text(
-                        "watch, youtu.be, shorts, live and embed links are all understood. Video-only renditions are joined with the audio automatically.",
+                        "YouTube works in every shape — watch, youtu.be, shorts, live and embed — and the sites NewPipe handles (PeerTube, SoundCloud, Bandcamp) work too. Video-only renditions are joined with the audio automatically.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

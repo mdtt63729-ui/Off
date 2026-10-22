@@ -10,9 +10,11 @@ import org.schabi.newpipe.extractor.stream.StreamInfo
 /**
  * Resolves a pasted link into something downloadable.
  *
- * NewPipe Extractor does the work locally first — no instance, no middleman —
- * and the Piped API (the backend LibreTube uses) is the fallback for when
- * YouTube changes something the extractor has not caught up with yet.
+ * NewPipe Extractor does the work locally first — no instance, no middleman. For
+ * YouTube links the Piped API (the backend LibreTube uses) is the fallback for
+ * when YouTube changes something the extractor has not caught up with yet. For
+ * any other site NewPipe supports (PeerTube, SoundCloud, Bandcamp, media.ccc.de)
+ * the extractor picks the right service by itself.
  *
  * Muxed (progressive) streams are preferred, because they already contain audio
  * and need no post-processing. Where a height only exists as video-only, the
@@ -44,21 +46,40 @@ class VideoRepository {
 
     /** Throws with a readable message if the link cannot be read at all. */
     suspend fun resolve(input: String): VideoInfo = withContext(Dispatchers.IO) {
-        val id = extractVideoId(input)
-            ?: error("That doesn't look like a YouTube link. Paste a video URL or an 11-character video id.")
+        val text = input.trim()
+        if (text.isEmpty()) error("Paste a video link first.")
 
-        val local = runCatching { resolveWithNewPipe(id) }.getOrNull()
-        if (local != null && local.qualities.isNotEmpty()) return@withContext local
+        val videoId = extractVideoId(text)
+        if (videoId != null) {
+            val local = runCatching { resolveYouTube(videoId) }.getOrNull()
+            if (local != null && local.qualities.isNotEmpty()) return@withContext local
 
-        PipedApi.streams(id)?.let { return@withContext it }
+            PipedApi.streams(videoId)?.let { return@withContext it }
 
-        error("Could not read that video. Check the link, and try again in a moment.")
+            error("Could not read that video. Check the link, and try again in a moment.")
+        }
+
+        // Not a YouTube link — let the extractor choose the service.
+        val generic = runCatching { resolveWithService(text) }.getOrNull()
+        if (generic != null && generic.qualities.isNotEmpty()) return@withContext generic
+
+        error("That link isn't supported. YouTube works, as do the sites NewPipe handles (PeerTube, SoundCloud, Bandcamp).")
     }
 
-    private fun resolveWithNewPipe(videoId: String): VideoInfo {
+    private fun resolveYouTube(videoId: String): VideoInfo {
         val service = NewPipe.getService(YOUTUBE_SERVICE_ID)
         val info = StreamInfo.getInfo(service, watchUrl(videoId))
+        return buildInfo(info, id = videoId, source = "NewPipe")
+    }
 
+    private fun resolveWithService(url: String): VideoInfo {
+        val service = NewPipe.getServiceByUrl(url)
+        val info = StreamInfo.getInfo(service, url)
+        val name = runCatching { service.serviceInfo.name }.getOrNull() ?: "NewPipe"
+        return buildInfo(info, id = url, source = name)
+    }
+
+    private fun buildInfo(info: StreamInfo, id: String, source: String): VideoInfo {
         val muxed = info.videoStreams
             .filter { it.isUrl && !it.url.isNullOrBlank() && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
             .sortedByDescending { it.height }
@@ -67,9 +88,15 @@ class VideoRepository {
             .filter { it.isUrl && !it.url.isNullOrBlank() }
             .sortedByDescending { it.height }
 
+        // Prefer AAC-in-MP4 audio, so a video-only rendition can be muxed into MP4 with -c copy.
         val bestAudio = info.audioStreams
             .filter { it.isUrl && !it.url.isNullOrBlank() }
-            .maxByOrNull { it.averageBitrate }
+            .sortedWith(
+                compareByDescending<org.schabi.newpipe.extractor.stream.AudioStream> {
+                    it.format?.mimeType?.contains("mp4") == true
+                }.thenByDescending { it.averageBitrate }
+            )
+            .firstOrNull()
 
         val qualities = ArrayList<VideoQuality>()
         val muxedHeights = HashSet<Int>()
@@ -102,13 +129,13 @@ class VideoRepository {
         }
 
         return VideoInfo(
-            id = videoId,
+            id = id,
             title = info.name ?: "Video",
             uploader = info.uploaderName ?: "Unknown",
             durationSec = info.duration.coerceAtLeast(0L),
             thumbnailUrl = info.thumbnails.lastOrNull()?.url,
             qualities = qualities.sortedByDescending { it.height },
-            source = "NewPipe"
+            source = source
         )
     }
 
