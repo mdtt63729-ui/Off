@@ -422,7 +422,7 @@ private fun OffApp() {
                                 }
                                 runCatching { context.startActivity(Intent.createChooser(intent, "Share audio")) }
                             } else {
-                                snackbar.showSnackbar("Save the audio first, then share it from your Library.")
+                                scope.launch { snackbar.showSnackbar("Save the audio first, then share it from your Library.") }
                             }
                         },
                         onDelete = { showDeleteCurrent = true },

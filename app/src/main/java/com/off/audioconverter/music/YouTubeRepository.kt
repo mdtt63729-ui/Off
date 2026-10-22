@@ -92,7 +92,7 @@ class YouTubeRepository {
         for (item in info.relatedItems) {
             val stream = item as? StreamInfoItem ?: continue
             val url = stream.url ?: continue
-            val id = stream.id ?: extractId(url)
+            val id = extractId(url)
             out += Track(
                 id = "yt:$id",
                 source = MusicSource.YOUTUBE,
@@ -117,7 +117,7 @@ class YouTubeRepository {
             ?: track.sourceId?.let { "https://www.youtube.com/watch?v=$it" }
             ?: error("This YouTube track has no video id.")
         val info = StreamInfo.getInfo(service(), url)
-        val candidates = info.audioStreams.filter { it.isUrl && it.url.isNotBlank() }
+        val candidates = info.audioStreams.filter { it.isUrl && !it.url.isNullOrBlank() }
         if (candidates.isEmpty()) error("No audio stream is available for this track.")
 
         val progressive = candidates
@@ -130,7 +130,7 @@ class YouTubeRepository {
         val chosen: AudioStream = best ?: candidates.first()
         val format = chosen.format
         return ResolvedAudio(
-            url = chosen.url,
+            url = chosen.url ?: error("The selected audio stream has no URL."),
             mimeType = format?.mimeType ?: "audio/mp4",
             extension = format?.suffix ?: "m4a",
             bitrateKbps = chosen.averageBitrate
