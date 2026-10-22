@@ -1,11 +1,16 @@
 package com.off.audioconverter.player
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,13 +20,15 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -48,13 +55,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.off.audioconverter.music.Track
+import kotlin.math.roundToInt
 
 private fun formatMs(ms: Long): String {
     val total = (ms / 1000).coerceAtLeast(0)
@@ -62,12 +75,13 @@ private fun formatMs(ms: Long): String {
 }
 
 /**
- * Compact now-playing bar that floats above the navigation bar. Tapping it
- * expands the full-screen player.
+ * Compact now-playing bar that floats above the navigation bar. Tap to expand,
+ * swipe down to dismiss and stop playback.
  */
 @Composable
 fun MiniPlayer(
     onExpand: () -> Unit,
+    onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val track by PlayerController.current.collectAsState()
@@ -76,6 +90,9 @@ fun MiniPlayer(
     val duration by PlayerController.durationMs.collectAsState()
     val buffering by PlayerController.isBuffering.collectAsState()
 
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    val dismissThreshold = 150f
+
     AnimatedVisibility(
         visible = track != null,
         enter = slideInVertically { it } + fadeIn(),
@@ -83,29 +100,47 @@ fun MiniPlayer(
         modifier = modifier
     ) {
         Surface(
-            onClick = onExpand,
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(26.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp,
-            shadowElevation = 10.dp,
-            modifier = Modifier.fillMaxWidth()
+            tonalElevation = 8.dp,
+            shadowElevation = 14.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(0, dragOffset.roundToInt()) }
+                .graphicsLayer { alpha = 1f - (dragOffset / 420f).coerceIn(0f, 0.65f) }
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragEnd = {
+                            if (dragOffset > dismissThreshold) {
+                                dragOffset = 0f
+                                onDismiss()
+                            } else {
+                                dragOffset = 0f
+                            }
+                        },
+                        onVerticalDrag = { _, delta ->
+                            dragOffset = (dragOffset + delta).coerceAtLeast(0f)
+                        }
+                    )
+                }
         ) {
-            Column {
+            Column(Modifier.fillMaxWidth()) {
                 val progress = if (duration > 0) (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
                 LinearProgressIndicator(
                     progress = { progress },
-                    modifier = Modifier.fillMaxWidth().height(3.dp),
-                    drawStopIndicator = {}
+                    modifier = Modifier.fillMaxWidth().height(3.dp)
                 )
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Surface(
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(15.dp),
                         color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier.size(46.dp)
+                        modifier = Modifier.size(48.dp)
                     ) {
                         if (track?.artworkUrl != null) {
                             AsyncImage(
@@ -118,7 +153,7 @@ fun MiniPlayer(
                                 Icons.Default.MusicNote,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.padding(11.dp)
+                                modifier = Modifier.padding(12.dp)
                             )
                         }
                     }
@@ -147,18 +182,7 @@ fun MiniPlayer(
                             contentColor = MaterialTheme.colorScheme.onPrimary
                         )
                     ) {
-                        if (buffering) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        } else {
-                            Icon(
-                                if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (isPlaying) "Pause" else "Play"
-                            )
-                        }
+                        PlayPauseGlyph(buffering = buffering, isPlaying = isPlaying, size = 20.dp)
                     }
                     IconButton(onClick = { PlayerController.next() }) {
                         Icon(Icons.Default.SkipNext, contentDescription = "Next")
@@ -169,9 +193,43 @@ fun MiniPlayer(
     }
 }
 
-/** Full-screen now-playing view with a seek bar, transport and download action. */
 @Composable
-fun FullPlayerScreen(
+private fun PlayPauseGlyph(buffering: Boolean, isPlaying: Boolean, size: androidx.compose.ui.unit.Dp) {
+    AnimatedContent(
+        targetState = if (buffering) 2 else if (isPlaying) 1 else 0,
+        transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
+        label = "play-pause"
+    ) { state ->
+        when (state) {
+            2 -> CircularProgressIndicator(
+                modifier = Modifier.size(size),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
+            1 -> Icon(Icons.Default.Pause, contentDescription = "Pause", modifier = Modifier.size(size))
+            else -> Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(size))
+        }
+    }
+}
+
+/** Full-screen now-playing view. Slides up from the bottom; swipe down to close. */
+@Composable
+fun FullPlayerOverlay(
+    visible: Boolean,
+    onCollapse: () -> Unit,
+    onDownload: (Track) -> Unit
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInVertically(tween(320)) { it } + fadeIn(tween(200)),
+        exit = slideOutVertically(tween(260)) { it } + fadeOut(tween(160))
+    ) {
+        FullPlayerContent(onCollapse = onCollapse, onDownload = onDownload)
+    }
+}
+
+@Composable
+private fun FullPlayerContent(
     onCollapse: () -> Unit,
     onDownload: (Track) -> Unit
 ) {
@@ -181,28 +239,48 @@ fun FullPlayerScreen(
     val duration by PlayerController.durationMs.collectAsState()
     val buffering by PlayerController.isBuffering.collectAsState()
     val hasNext by PlayerController.hasNext.collectAsState()
+    val hasPrevious by PlayerController.hasPrevious.collectAsState()
 
     var scrub by remember { mutableStateOf<Float?>(null) }
     val shown = scrub ?: position.toFloat()
+    val dragProgress by animateFloatAsState(if (scrub != null) 1f else 0f, label = "scrub")
+
+    var collapseDrag by remember { mutableFloatStateOf(0f) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.surfaceContainerHigh,
-                        MaterialTheme.colorScheme.background
-                    )
+                    0f to MaterialTheme.colorScheme.surfaceContainerHigh,
+                    0.55f to MaterialTheme.colorScheme.surface,
+                    1f to MaterialTheme.colorScheme.background
                 )
             )
+            .offset { IntOffset(0, collapseDrag.roundToInt()) }
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures(
+                            onDragEnd = {
+                                if (collapseDrag > 160f) onCollapse() else collapseDrag = 0f
+                            },
+                            onVerticalDrag = { _, delta ->
+                                collapseDrag = (collapseDrag + delta).coerceAtLeast(0f)
+                            }
+                        )
+                    },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onCollapse) {
@@ -214,39 +292,40 @@ fun FullPlayerScreen(
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
-                IconButton(
-                    onClick = { track?.let(onDownload) },
-                    enabled = track != null
-                ) {
+                IconButton(onClick = { track?.let(onDownload) }, enabled = track != null) {
                     Icon(Icons.Default.Download, contentDescription = "Download")
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.weight(1f))
 
             Surface(
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(30.dp),
                 color = MaterialTheme.colorScheme.secondaryContainer,
-                shadowElevation = 16.dp,
-                modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .shadow(18.dp, RoundedCornerShape(30.dp))
             ) {
                 if (track?.artworkUrl != null) {
                     AsyncImage(
                         model = track?.artworkUrl,
                         contentDescription = null,
-                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(28.dp))
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(30.dp))
                     )
                 } else {
-                    Icon(
-                        Icons.Default.MusicNote,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.fillMaxSize().padding(80.dp)
-                    )
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.MusicNote,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.size(96.dp)
+                        )
+                    }
                 }
             }
 
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(30.dp))
 
             Text(
                 track?.title ?: "Nothing playing",
@@ -256,7 +335,7 @@ fun FullPlayerScreen(
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
             Text(
                 track?.subtitle ?: "",
                 style = MaterialTheme.typography.bodyLarge,
@@ -265,7 +344,7 @@ fun FullPlayerScreen(
                 overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(22.dp))
 
             Slider(
                 value = shown.coerceIn(0f, duration.toFloat().coerceAtLeast(1f)),
@@ -275,71 +354,65 @@ fun FullPlayerScreen(
                     scrub = null
                 },
                 enabled = duration > 0,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().graphicsLayer { scaleY = 1f + dragProgress * 0.15f }
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(formatMs(shown.toLong()), style = MaterialTheme.typography.labelMedium)
                 Text(formatMs(duration), style = MaterialTheme.typography.labelMedium)
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { PlayerController.previous() }, modifier = Modifier.size(56.dp)) {
-                    Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", modifier = Modifier.size(34.dp))
+                IconButton(
+                    onClick = { PlayerController.previous() },
+                    enabled = hasPrevious,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", modifier = Modifier.size(36.dp))
                 }
-                Spacer(Modifier.width(20.dp))
+                Spacer(Modifier.width(22.dp))
                 FilledIconButton(
                     onClick = { PlayerController.togglePlayPause() },
-                    modifier = Modifier.size(72.dp),
+                    modifier = Modifier.size(76.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    if (buffering) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(26.dp),
-                            strokeWidth = 3.dp,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                    } else {
-                        Icon(
-                            if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "Pause" else "Play",
-                            modifier = Modifier.size(34.dp)
-                        )
-                    }
+                    PlayPauseGlyph(buffering = buffering, isPlaying = isPlaying, size = 36.dp)
                 }
-                Spacer(Modifier.width(20.dp))
+                Spacer(Modifier.width(22.dp))
                 IconButton(
                     onClick = { PlayerController.next() },
                     enabled = hasNext,
                     modifier = Modifier.size(56.dp)
                 ) {
-                    Icon(Icons.Default.SkipNext, contentDescription = "Next", modifier = Modifier.size(34.dp))
+                    Icon(Icons.Default.SkipNext, contentDescription = "Next", modifier = Modifier.size(36.dp))
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
+
             track?.let {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh
                 ) {
                     Text(
-                        "Source · ${it.source.label}",
+                        "Source · ${it.source.label}" + (it.bitrateKbps?.let { q -> " · ${q}kbps" } ?: ""),
                         style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-            Spacer(Modifier.height(24.dp))
+
+            Spacer(Modifier.weight(1f))
         }
     }
 }

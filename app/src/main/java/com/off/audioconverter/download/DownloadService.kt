@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
@@ -18,6 +19,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import com.off.audioconverter.MainActivity
+import com.off.audioconverter.music.MusicSource
 import com.off.audioconverter.music.ResolvedAudio
 import com.off.audioconverter.music.Track
 import kotlinx.coroutines.CoroutineScope
@@ -28,6 +30,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
+import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -35,13 +38,18 @@ import java.net.URL
  * Downloads a resolved audio stream and mirrors progress into the status bar.
  *
  * Runs as a `dataSync` foreground service so the download survives the app being
- * backgrounded, and keeps a determinate progress notification on screen.
+ * backgrounded. The notification is determinate and carries Pause/Resume and
+ * Cancel actions.
  */
 class DownloadService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "off_downloads"
         private const val NOTIFICATION_ID = 4711
+        const val ACTION_PAUSE = "com.off.audioconverter.download.PAUSE"
+        const val ACTION_RESUME = "com.off.audioconverter.download.RESUME"
+        const val ACTION_CANCEL = "com.off.audioconverter.download.CANCEL"
+
         private const val EXTRA_ID = "id"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_ARTIST = "artist"
@@ -53,7 +61,7 @@ class DownloadService : Service() {
         private const val EXTRA_TRACK_ID = "trackId"
         private const val EXTRA_SOURCE = "source"
 
-        /** Resolves nothing — the caller must pass an already-resolved stream. */
+        /** The caller must pass an already-resolved stream. */
         fun enqueue(context: Context, track: Track, resolved: ResolvedAudio, taskId: String) {
             val intent = Intent(context, DownloadService::class.java).apply {
                 putExtra(EXTRA_ID, taskId)
@@ -74,12 +82,20 @@ class DownloadService : Service() {
             }
         }
 
+        fun pause(context: Context) = sendAction(context, ACTION_PAUSE)
+        fun resume(context: Context) = sendAction(context, ACTION_RESUME)
+        fun cancel(context: Context) = sendAction(context, ACTION_CANCEL)
+
+        private fun sendAction(context: Context, action: String) {
+            val intent = Intent(context, DownloadService::class.java).setAction(action)
+            runCatching { context.startService(intent) }
+        }
+
         private fun trackFrom(intent: Intent): Track? {
             val url = intent.getStringExtra(EXTRA_URL) ?: return null
-            val sourceName = intent.getStringExtra(EXTRA_SOURCE)
-            val source = com.off.audioconverter.music.MusicSource.entries
-                .firstOrNull { it.name == sourceName }
-                ?: com.off.audioconverter.music.MusicSource.YOUTUBE
+            val source = MusicSource.entries
+                .firstOrNull { it.name == intent.getStringExtra(EXTRA_SOURCE) }
+                ?: MusicSource.YOUTUBE
             return Track(
                 id = intent.getStringExtra(EXTRA_TRACK_ID) ?: "track:${url.hashCode()}",
                 source = source,
@@ -96,7 +112,10 @@ class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pending = ArrayDeque<DownloadTask>()
     private var worker: Job? = null
-    private var currentCancel: (() -> Unit)? = null
+
+    @Volatile private var paused = false
+    @Volatile private var cancelled = false
+    @Volatile private var currentTask: DownloadTask? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -106,6 +125,30 @@ class DownloadService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_PAUSE -> {
+                paused = true
+                currentTask?.let { task ->
+                    DownloadStore.update(task.id) { it.copy(status = DownloadStatus.PAUSED, message = "Paused") }
+                    notify(buildNotification(task.copy(status = DownloadStatus.PAUSED, message = "Paused")))
+                }
+                return START_NOT_STICKY
+            }
+            ACTION_RESUME -> {
+                paused = false
+                currentTask?.let { task ->
+                    DownloadStore.update(task.id) { it.copy(status = DownloadStatus.RUNNING, message = "Resuming…") }
+                    notify(buildNotification(task.copy(status = DownloadStatus.RUNNING)))
+                }
+                return START_NOT_STICKY
+            }
+            ACTION_CANCEL -> {
+                cancelled = true
+                paused = false
+                return START_NOT_STICKY
+            }
+        }
+
         val taskId = intent?.getStringExtra(EXTRA_ID)
         val track = intent?.let { trackFrom(it) }
         if (taskId == null || track == null) {
@@ -115,8 +158,7 @@ class DownloadService : Service() {
         val task = DownloadTask(id = taskId, track = track, status = DownloadStatus.QUEUED)
         DownloadStore.add(task)
         pending.addLast(task)
-        // Enter the foreground immediately so the system does not time us out.
-        startForegroundCompat(buildNotification(task, indeterminate = true))
+        startForegroundCompat(buildNotification(task))
         if (worker?.isActive != true) {
             worker = scope.launch { drainQueue() }
         }
@@ -133,8 +175,11 @@ class DownloadService : Service() {
     }
 
     private fun runDownload(task: DownloadTask) {
+        currentTask = task
+        paused = false
+        cancelled = false
         DownloadStore.update(task.id) { it.copy(status = DownloadStatus.RUNNING, message = "Starting…") }
-        notify(buildNotification(task.copy(status = DownloadStatus.RUNNING), indeterminate = true))
+        notify(buildNotification(task.copy(status = DownloadStatus.RUNNING)))
 
         var connection: HttpURLConnection? = null
         var outputUri: Uri? = null
@@ -144,7 +189,7 @@ class DownloadService : Service() {
                 connectTimeout = 15000
                 readTimeout = 30000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "Off-Android/3.0")
+                setRequestProperty("User-Agent", "Off-Android/3.1")
             }
             connection.connect()
             val code = connection.responseCode
@@ -153,7 +198,7 @@ class DownloadService : Service() {
 
             val name = buildFileName(task.track)
             val resolver = contentResolver
-            val target: Any = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val target: OutputStream = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                     put(MediaStore.MediaColumns.MIME_TYPE, task.track.mimeType ?: "audio/mpeg")
@@ -172,22 +217,25 @@ class DownloadService : Service() {
             }
 
             connection.inputStream.use { input ->
-                (target as java.io.OutputStream).use { output ->
+                target.use { output ->
                     val buffer = ByteArray(64 * 1024)
                     var read = input.read(buffer)
                     var done = 0L
                     var lastPercent = -1
                     while (read >= 0) {
+                        if (cancelled) error("Download cancelled")
+                        while (paused && !cancelled) Thread.sleep(150)
+                        if (cancelled) error("Download cancelled")
                         output.write(buffer, 0, read)
                         done += read
                         if (total > 0) {
                             val percent = ((done * 100) / total).toInt().coerceIn(0, 100)
                             if (percent != lastPercent) {
                                 lastPercent = percent
-                                onProgress(task, done, total, percent)
+                                onProgress(task, done, total)
                             }
                         } else {
-                            onProgress(task, done, -1L, -1)
+                            onProgress(task, done, -1L)
                         }
                         read = input.read(buffer)
                     }
@@ -215,21 +263,27 @@ class DownloadService : Service() {
                     message = "Saved to Downloads/Off"
                 )
             }
-            notify(buildCompleted(task.copy(status = DownloadStatus.COMPLETED, savedName = name)))
+            notify(buildCompleted(task, name))
         } catch (e: Exception) {
             outputUri?.let { runCatching { contentResolver.delete(it, null, null) } }
             legacyFile?.let { runCatching { it.delete() } }
+            val wasCancelled = cancelled
             DownloadStore.update(task.id) {
-                it.copy(status = DownloadStatus.FAILED, message = e.message ?: "Download failed.")
+                it.copy(
+                    status = DownloadStatus.FAILED,
+                    message = if (wasCancelled) "Cancelled" else (e.message ?: "Download failed.")
+                )
             }
-            notify(buildFailed(task.copy(status = DownloadStatus.FAILED, message = e.message)))
+            notify(buildFailed(task, if (wasCancelled) "Cancelled" else e.message))
         } finally {
             runCatching { connection?.disconnect() }
-            currentCancel = null
+            currentTask = null
+            paused = false
+            cancelled = false
         }
     }
 
-    private fun onProgress(task: DownloadTask, done: Long, total: Long, percent: Int) {
+    private fun onProgress(task: DownloadTask, done: Long, total: Long) {
         val progress = if (total > 0) done.toFloat() / total.toFloat() else null
         DownloadStore.update(task.id) {
             it.copy(
@@ -237,10 +291,10 @@ class DownloadService : Service() {
                 downloadedBytes = done,
                 totalBytes = total,
                 progress = progress,
-                message = if (percent >= 0) "$percent%" else formatBytes(done)
+                message = if (total > 0) "${((done * 100) / total)}%" else formatBytes(done)
             )
         }
-        notify(buildNotification(task.copy(downloadedBytes = done, totalBytes = total, progress = progress), indeterminate = total <= 0))
+        notify(buildNotification(task.copy(downloadedBytes = done, totalBytes = total, progress = progress)))
     }
 
     /* ------------------------------- notifications ------------------------------ */
@@ -249,56 +303,72 @@ class DownloadService : Service() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java) ?: return
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Music downloads",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply { description = "Progress for downloads started in Off" }
-        manager.createNotificationChannel(channel)
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "Music downloads", NotificationManager.IMPORTANCE_LOW)
+                .apply { description = "Progress for downloads started in Off" }
+        )
     }
 
     private fun contentIntent(): PendingIntent = PendingIntent.getActivity(
-        this,
-        0,
-        Intent(this, MainActivity::class.java),
+        this, 0, Intent(this, MainActivity::class.java),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
-    private fun buildNotification(task: DownloadTask, indeterminate: Boolean): Notification {
+    private fun actionIntent(action: String, requestCode: Int): PendingIntent = PendingIntent.getService(
+        this, requestCode, Intent(this, DownloadService::class.java).setAction(action),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    private fun buildNotification(task: DownloadTask): Notification {
+        val pausedNow = task.status == DownloadStatus.PAUSED
         val percent = if (task.totalBytes > 0) ((task.downloadedBytes * 100) / task.totalBytes).toInt().coerceIn(0, 100) else 0
         val detail = if (task.totalBytes > 0) {
             "${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}"
         } else {
             formatBytes(task.downloadedBytes)
         }
+        val toggle = if (pausedNow) {
+            NotificationCompat.Action.Builder(
+                android.R.drawable.ic_media_play, "Resume", actionIntent(ACTION_RESUME, 2)
+            ).build()
+        } else {
+            NotificationCompat.Action.Builder(
+                android.R.drawable.ic_media_pause, "Pause", actionIntent(ACTION_PAUSE, 1)
+            ).build()
+        }
+        val cancel = NotificationCompat.Action.Builder(
+            android.R.drawable.ic_menu_close_clear_cancel, "Cancel", actionIntent(ACTION_CANCEL, 3)
+        ).build()
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(task.track.title)
-            .setContentText(detail)
+            .setContentText(if (pausedNow) "Paused · $detail" else detail)
             .setSubText(task.track.artist.ifBlank { "Off" })
-            .setProgress(100, percent, indeterminate)
+            .setProgress(100, percent, task.totalBytes <= 0)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent())
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(toggle)
+            .addAction(cancel)
             .build()
     }
 
-    private fun buildCompleted(task: DownloadTask): Notification =
+    private fun buildCompleted(task: DownloadTask, name: String): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Saved: ${task.track.title}")
-            .setContentText("Download complete · Downloads/Off")
+            .setContentText("Download complete · $name")
             .setOngoing(false)
             .setAutoCancel(true)
             .setContentIntent(contentIntent())
             .build()
 
-    private fun buildFailed(task: DownloadTask): Notification =
+    private fun buildFailed(task: DownloadTask, reason: String?): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_error)
-            .setContentTitle("Download failed")
-            .setContentText("${task.track.title} — ${task.message ?: "unknown error"}")
+            .setContentTitle(if (reason == "Cancelled") "Download cancelled" else "Download failed")
+            .setContentText("${task.track.title} — ${reason ?: "unknown error"}")
             .setOngoing(false)
             .setAutoCancel(true)
             .setContentIntent(contentIntent())
@@ -306,8 +376,7 @@ class DownloadService : Service() {
 
     private fun notify(notification: Notification) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-            android.content.pm.PackageManager.PERMISSION_GRANTED
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             return
         }
@@ -336,9 +405,11 @@ class DownloadService : Service() {
             .trim()
             .take(90)
             .ifBlank { "Off Audio" }
-        val ext = if (track.mimeType?.contains("mp4") == true) "m4a"
-        else if (track.mimeType?.contains("webm") == true) "webm"
-        else "mp3"
+        val ext = when {
+            track.mimeType?.contains("mp4") == true -> "m4a"
+            track.mimeType?.contains("webm") == true -> "webm"
+            else -> "mp3"
+        }
         return "$base.$ext"
     }
 

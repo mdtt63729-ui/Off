@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-enum class DownloadStatus { QUEUED, RUNNING, COMPLETED, FAILED }
+enum class DownloadStatus { QUEUED, RUNNING, PAUSED, COMPLETED, FAILED }
 
 data class DownloadTask(
     val id: String,
@@ -40,15 +40,16 @@ object DownloadStore {
         _tasks.update { list -> list.map { if (it.id == id) transform(it) else it } }
     }
 
-    fun activeCount(): Int = _tasks.value.count {
-        it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.RUNNING
-    }
+    fun activeCount(): Int = _tasks.value.count { isActive(it.status) }
+
+    fun isActive(status: DownloadStatus): Boolean =
+        status == DownloadStatus.QUEUED || status == DownloadStatus.RUNNING || status == DownloadStatus.PAUSED
 
     fun isDownloaded(trackId: String): Boolean =
         _tasks.value.any { it.track.id == trackId && it.status == DownloadStatus.COMPLETED }
 
     fun clearFinished() {
-        _tasks.update { list -> list.filter { it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.RUNNING } }
+        _tasks.update { list -> list.filter { isActive(it.status) } }
     }
 
     fun remove(id: String) {

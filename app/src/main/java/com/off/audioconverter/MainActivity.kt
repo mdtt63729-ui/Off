@@ -13,27 +13,44 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -42,12 +59,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -68,7 +88,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -91,22 +110,29 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.off.audioconverter.conversion.AudioConversionEngine
 import com.off.audioconverter.conversion.ConversionOptions
 import com.off.audioconverter.conversion.ConversionResult
 import com.off.audioconverter.domain.ConversionStatus
+import com.off.audioconverter.download.DownloadService
 import com.off.audioconverter.download.DownloadStatus
 import com.off.audioconverter.download.DownloadStore
 import com.off.audioconverter.download.DownloadTask
+import com.off.audioconverter.music.MusicRepository
 import com.off.audioconverter.music.MusicSearchScreen
-import com.off.audioconverter.player.FullPlayerScreen
+import com.off.audioconverter.player.FullPlayerOverlay
 import com.off.audioconverter.player.MiniPlayer
 import com.off.audioconverter.player.PlayerController
+import com.off.audioconverter.ui.SettingsStore
 import com.off.audioconverter.ui.components.FloatingNavBar
 import com.off.audioconverter.ui.components.NavItem
 import com.off.audioconverter.ui.theme.OffTheme
@@ -126,6 +152,10 @@ private val BOTTOM_PAGES = listOf(OffPage.HOME, OffPage.SEARCH, OffPage.LIBRARY)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
         super.onCreate(savedInstanceState)
         setContent { OffTheme { OffApp() } }
     }
@@ -138,20 +168,22 @@ private fun OffApp() {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val engine = remember { AudioConversionEngine(context.contentResolver, context.cacheDir) }
+    val settings = remember { SettingsStore(context) }
+
     var page by remember { mutableStateOf(OffPage.HOME) }
     var showPlayer by remember { mutableStateOf(false) }
 
-    // Conversion state
+    // Conversion state — restored from the settings store so it survives a restart.
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var selectedName by remember { mutableStateOf<String?>(null) }
     var durationSec by remember { mutableIntStateOf(0) }
-    var bitrate by remember { mutableIntStateOf(192) }
+    var bitrate by remember { mutableIntStateOf(settings.bitrate) }
     var trimStart by remember { mutableFloatStateOf(0f) }
     var trimEnd by remember { mutableFloatStateOf(0f) }
-    var speed by remember { mutableFloatStateOf(1f) }
-    var fadeIn by remember { mutableFloatStateOf(0f) }
-    var fadeOut by remember { mutableFloatStateOf(0f) }
-    var volume by remember { mutableFloatStateOf(1f) }
+    var speed by remember { mutableFloatStateOf(settings.speed) }
+    var fadeIn by remember { mutableFloatStateOf(settings.fadeIn) }
+    var fadeOut by remember { mutableFloatStateOf(settings.fadeOut) }
+    var volume by remember { mutableFloatStateOf(settings.volume) }
     var status by remember { mutableStateOf(ConversionStatus.IDLE) }
     var conversionJobId by remember { mutableIntStateOf(0) }
     var statusMessage by remember { mutableStateOf("Ready when you are") }
@@ -162,18 +194,16 @@ private fun OffApp() {
     var isSaving by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf<SavedAudio?>(null) }
     var showDeleteCurrent by remember { mutableStateOf(false) }
-    var reducedMotion by remember { mutableStateOf(false) }
+    var reducedMotion by remember { mutableStateOf(settings.reducedMotion) }
     val history = remember { mutableStateListOf<SavedAudio>().apply { addAll(loadHistory(context)) } }
 
     fun persistHistory() = saveHistory(context, history)
 
-    // Connect the shared player and ask for notification permission (downloads + media).
-    LaunchedEffect(Unit) {
-        PlayerController.connect(context)
-    }
+    LaunchedEffect(Unit) { PlayerController.connect(context) }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* result handled silently; notifications are best-effort */ }
+    ) { }
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -189,6 +219,13 @@ private fun OffApp() {
             PlayerController.clearMessage()
         }
     }
+
+    // Insets so the floating bars can overlay the content (edge to edge).
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val navBarBottom: Dp = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val topPad: Dp = statusBarTop + 74.dp
+    val bottomPad: Dp = navBarBottom + 176.dp
+    val contentPadding = PaddingValues(top = topPad, bottom = bottomPad)
 
     val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -282,9 +319,183 @@ private fun OffApp() {
         }
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
-        topBar = {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 200.dp))
+
+        AnimatedContent(
+            targetState = page,
+            transitionSpec = {
+                if (reducedMotion) {
+                    fadeIn(tween(220)) togetherWith fadeOut(tween(160))
+                } else {
+                    (slideInHorizontally(tween(320)) { it / 5 } + fadeIn(tween(240)) + scaleIn(tween(320), initialScale = 0.94f)) togetherWith
+                        (slideOutHorizontally(tween(260)) { -it / 8 } + fadeOut(tween(160)) + scaleOut(tween(260), targetScale = 0.96f))
+                }
+            },
+            label = "off-page-transition",
+            modifier = Modifier.fillMaxSize()
+        ) { target ->
+            when (target) {
+                OffPage.HOME -> HomeScreen(
+                    contentPadding = contentPadding,
+                    selectedName = selectedName,
+                    recentCount = history.size,
+                    onPick = { pickVideo.launch(arrayOf("video/*")) },
+                    onLibrary = { page = OffPage.LIBRARY },
+                    onSearch = { page = OffPage.SEARCH }
+                )
+                OffPage.SEARCH -> MusicSearchScreen(
+                    modifier = Modifier.padding(contentPadding)
+                )
+                OffPage.EDITOR -> EditorScreen(
+                    contentPadding = contentPadding,
+                    name = selectedName ?: "Selected video",
+                    duration = durationSec,
+                    bitrate = bitrate,
+                    onBitrate = { bitrate = it; settings.bitrate = it },
+                    trimStart = trimStart, onTrimStart = { trimStart = it },
+                    trimEnd = trimEnd, onTrimEnd = { trimEnd = it },
+                    speed = speed, onSpeed = { speed = it; settings.speed = it },
+                    fadeIn = fadeIn, onFadeIn = { fadeIn = it; settings.fadeIn = it },
+                    fadeOut = fadeOut, onFadeOut = { fadeOut = it; settings.fadeOut = it },
+                    volume = volume, onVolume = { volume = it; settings.volume = it },
+                    onBack = { page = OffPage.HOME },
+                    onExport = {
+                        val uri = selectedUri
+                        if (uri != null) {
+                            conversionJobId += 1
+                            val thisJobId = conversionJobId
+                            status = ConversionStatus.PREPARING
+                            statusMessage = "Preparing your audio…"
+                            page = OffPage.PROGRESS
+                            scope.launch {
+                                val options = ConversionOptions(
+                                    bitrateKbps = bitrate,
+                                    trimStartSeconds = trimStart,
+                                    trimEndSeconds = trimEnd,
+                                    speed = speed,
+                                    fadeInSeconds = fadeIn,
+                                    fadeOutSeconds = fadeOut,
+                                    volume = volume
+                                )
+                                val result = engine.convert(uri, options) { message -> statusMessage = message }
+                                if (thisJobId == conversionJobId && status != ConversionStatus.CANCELLED) {
+                                    when (result) {
+                                        is ConversionResult.Success -> {
+                                            pendingOutput?.delete()
+                                            pendingOutput = result.outputFile
+                                            currentOutputUri = null
+                                            currentHistoryId = null
+                                            currentOutputName = safeMp3Name(selectedName ?: "off-audio.mp3")
+                                            status = ConversionStatus.COMPLETED
+                                            statusMessage = "Conversion complete. Save a copy to Downloads when you’re ready."
+                                            page = OffPage.RESULT
+                                        }
+                                        is ConversionResult.Failure -> {
+                                            status = ConversionStatus.FAILED
+                                            statusMessage = result.message
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                )
+                OffPage.PROGRESS -> ProgressScreen(
+                    contentPadding = contentPadding,
+                    statusMessage = statusMessage,
+                    failed = status == ConversionStatus.FAILED,
+                    onCancel = {
+                        conversionJobId += 1
+                        engine.cancel()
+                        status = ConversionStatus.CANCELLED
+                        statusMessage = "Conversion cancelled."
+                        page = OffPage.EDITOR
+                    },
+                    onRetry = { page = OffPage.EDITOR }
+                )
+                OffPage.RESULT -> ResultScreen(
+                    contentPadding = contentPadding,
+                    name = currentOutputName ?: "off-audio.mp3",
+                    bytes = pendingOutput?.length() ?: 0L,
+                    saved = currentOutputUri != null,
+                    saving = isSaving,
+                    onSave = { saveCurrentAudio() },
+                    onShare = {
+                        val uri = currentOutputUri?.let(Uri::parse)
+                        if (uri != null) {
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "audio/mpeg"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            runCatching { context.startActivity(Intent.createChooser(intent, "Share audio")) }
+                        } else {
+                            scope.launch { snackbar.showSnackbar("Save the audio first, then share it from your Library.") }
+                        }
+                    },
+                    onDelete = { showDeleteCurrent = true },
+                    onDone = { page = OffPage.HOME }
+                )
+                OffPage.LIBRARY -> LibraryScreen(
+                    contentPadding = contentPadding,
+                    items = history,
+                    onOpen = { item ->
+                        runCatching {
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(Uri.parse(item.uri), "audio/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(intent)
+                        }.onFailure {
+                            scope.launch { snackbar.showSnackbar("This file can’t be opened. It may have been moved or deleted.") }
+                        }
+                    },
+                    onShare = { item ->
+                        runCatching {
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "audio/mpeg"
+                                putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(intent, "Share audio"))
+                        }
+                    },
+                    onDelete = { showDeleteDialog = it },
+                    onOpenUri = { raw ->
+                        runCatching {
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(Uri.parse(raw), "audio/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(intent)
+                        }
+                    },
+                    onClearDownloads = { DownloadStore.clearFinished() }
+                )
+                OffPage.SETTINGS -> SettingsScreen(
+                    contentPadding = contentPadding,
+                    reducedMotion = reducedMotion,
+                    onReducedMotion = { reducedMotion = it; settings.reducedMotion = it },
+                    onBack = { page = OffPage.HOME }
+                )
+            }
+        }
+
+        // Translucent top bar: content scrolls beneath it.
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        0f to MaterialTheme.colorScheme.background,
+                        0.72f to MaterialTheme.colorScheme.background.copy(alpha = 0.82f),
+                        1f to Color.Transparent
+                    )
+                )
+                .statusBarsPadding()
+        ) {
             TopAppBar(
                 navigationIcon = {
                     if (page !in BOTTOM_PAGES) {
@@ -318,199 +529,66 @@ private fun OffApp() {
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         }
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            AnimatedContent(
-                targetState = page,
-                transitionSpec = {
-                    if (reducedMotion) fadeIn() togetherWith fadeOut()
-                    else (slideInHorizontally { it / 8 } + fadeIn()) togetherWith
-                        (slideOutHorizontally { -it / 12 } + fadeOut())
-                },
-                label = "off-page-transition",
-                modifier = Modifier.fillMaxSize().padding(bottom = 156.dp)
-            ) { target ->
-                when (target) {
-                    OffPage.HOME -> HomeScreen(
-                        selectedName = selectedName,
-                        recentCount = history.size,
-                        onPick = { pickVideo.launch(arrayOf("video/*")) },
-                        onLibrary = { page = OffPage.LIBRARY },
-                        onSearch = { page = OffPage.SEARCH }
-                    )
-                    OffPage.SEARCH -> MusicSearchScreen()
-                    OffPage.EDITOR -> EditorScreen(
-                        name = selectedName ?: "Selected video",
-                        duration = durationSec,
-                        bitrate = bitrate, onBitrate = { bitrate = it },
-                        trimStart = trimStart, onTrimStart = { trimStart = it },
-                        trimEnd = trimEnd, onTrimEnd = { trimEnd = it },
-                        speed = speed, onSpeed = { speed = it },
-                        fadeIn = fadeIn, onFadeIn = { fadeIn = it },
-                        fadeOut = fadeOut, onFadeOut = { fadeOut = it },
-                        volume = volume, onVolume = { volume = it },
-                        onBack = { page = OffPage.HOME },
-                        onExport = {
-                            val uri = selectedUri
-                            if (uri != null) {
-                                conversionJobId += 1
-                                val thisJobId = conversionJobId
-                                status = ConversionStatus.PREPARING
-                                statusMessage = "Preparing your audio…"
-                                page = OffPage.PROGRESS
-                                scope.launch {
-                                    val options = ConversionOptions(
-                                        bitrateKbps = bitrate,
-                                        trimStartSeconds = trimStart,
-                                        trimEndSeconds = trimEnd,
-                                        speed = speed,
-                                        fadeInSeconds = fadeIn,
-                                        fadeOutSeconds = fadeOut,
-                                        volume = volume
-                                    )
-                                    val result = engine.convert(uri, options) { message -> statusMessage = message }
-                                    if (thisJobId == conversionJobId && status != ConversionStatus.CANCELLED) {
-                                        when (result) {
-                                            is ConversionResult.Success -> {
-                                                pendingOutput?.delete()
-                                                pendingOutput = result.outputFile
-                                                currentOutputUri = null
-                                                currentHistoryId = null
-                                                currentOutputName = safeMp3Name(selectedName ?: "off-audio.mp3")
-                                                status = ConversionStatus.COMPLETED
-                                                statusMessage = "Conversion complete. Save a copy to Downloads when you’re ready."
-                                                page = OffPage.RESULT
-                                            }
-                                            is ConversionResult.Failure -> {
-                                                status = ConversionStatus.FAILED
-                                                statusMessage = result.message
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    )
-                    OffPage.PROGRESS -> ProgressScreen(
-                        statusMessage = statusMessage,
-                        failed = status == ConversionStatus.FAILED,
-                        onCancel = {
-                            conversionJobId += 1
-                            engine.cancel()
-                            status = ConversionStatus.CANCELLED
-                            statusMessage = "Conversion cancelled."
-                            page = OffPage.EDITOR
-                        },
-                        onRetry = { page = OffPage.EDITOR }
-                    )
-                    OffPage.RESULT -> ResultScreen(
-                        name = currentOutputName ?: "off-audio.mp3",
-                        bytes = pendingOutput?.length() ?: 0L,
-                        saved = currentOutputUri != null,
-                        saving = isSaving,
-                        onSave = { saveCurrentAudio() },
-                        onShare = {
-                            val uri = currentOutputUri?.let(Uri::parse)
-                            if (uri != null) {
-                                val intent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "audio/mpeg"
-                                    putExtra(Intent.EXTRA_STREAM, uri)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                runCatching { context.startActivity(Intent.createChooser(intent, "Share audio")) }
-                            } else {
-                                scope.launch { snackbar.showSnackbar("Save the audio first, then share it from your Library.") }
-                            }
-                        },
-                        onDelete = { showDeleteCurrent = true },
-                        onDone = { page = OffPage.HOME }
-                    )
-                    OffPage.LIBRARY -> LibraryScreen(
-                        items = history,
-                        onOpen = { item ->
-                            runCatching {
-                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                    setDataAndType(Uri.parse(item.uri), "audio/*")
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                context.startActivity(intent)
-                            }.onFailure {
-                                scope.launch { snackbar.showSnackbar("This file can’t be opened. It may have been moved or deleted.") }
-                            }
-                        },
-                        onShare = { item ->
-                            runCatching {
-                                val intent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "audio/mpeg"
-                                    putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                context.startActivity(Intent.createChooser(intent, "Share audio"))
-                            }
-                        },
-                        onDelete = { showDeleteDialog = it },
-                        onOpenUri = { raw ->
-                            runCatching {
-                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                    setDataAndType(Uri.parse(raw), "audio/*")
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                context.startActivity(intent)
-                            }
-                        },
-                        onClearDownloads = { DownloadStore.clearFinished() }
-                    )
-                    OffPage.SETTINGS -> SettingsScreen(
-                        reducedMotion = reducedMotion,
-                        onReducedMotion = { reducedMotion = it },
-                        onBack = { page = OffPage.HOME }
-                    )
-                }
-            }
 
-            // Floating bottom cluster: mini player + navigation bar.
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                MiniPlayer(onExpand = { showPlayer = true }, modifier = Modifier.fillMaxWidth())
-                if (page in BOTTOM_PAGES) {
-                    FloatingNavBar(
-                        items = listOf(
-                            NavItem("Studio", Icons.Default.Home),
-                            NavItem("Search", Icons.Default.Search),
-                            NavItem("Library", Icons.Default.LibraryMusic)
-                        ),
-                        selectedIndex = BOTTOM_PAGES.indexOf(page).coerceAtLeast(0),
-                        onSelect = { index -> page = BOTTOM_PAGES[index] }
+        // Translucent bottom scrim behind the floating cluster.
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(224.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.45f to MaterialTheme.colorScheme.background.copy(alpha = 0.88f),
+                        1f to MaterialTheme.colorScheme.background
                     )
-                }
+                )
+        )
+
+        // Floating bottom cluster: mini player + navigation bar.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            MiniPlayer(
+                onExpand = { showPlayer = true },
+                onDismiss = { PlayerController.stop() },
+                modifier = Modifier.fillMaxWidth()
+            )
+            if (page in BOTTOM_PAGES) {
+                FloatingNavBar(
+                    items = listOf(
+                        NavItem("Studio", Icons.Default.Home),
+                        NavItem("Search", Icons.Default.Search),
+                        NavItem("Library", Icons.Default.LibraryMusic)
+                    ),
+                    selectedIndex = BOTTOM_PAGES.indexOf(page).coerceAtLeast(0),
+                    onSelect = { index -> page = BOTTOM_PAGES[index] }
+                )
             }
         }
     }
 
-    if (showPlayer) {
-        FullPlayerScreen(
-            onCollapse = { showPlayer = false },
-            onDownload = { track ->
-                scope.launch {
-                    runCatching {
-                        val resolved = com.off.audioconverter.music.MusicRepository().resolveStream(track)
-                        com.off.audioconverter.download.DownloadService.enqueue(
-                            context, track, resolved, UUID.randomUUID().toString()
-                        )
-                        snackbar.showSnackbar("Downloading “${track.title}”…")
-                    }.onFailure { snackbar.showSnackbar(it.message ?: "Could not start the download.") }
-                }
+    FullPlayerOverlay(
+        visible = showPlayer,
+        onCollapse = { showPlayer = false },
+        onDownload = { track ->
+            scope.launch {
+                runCatching {
+                    val resolved = MusicRepository().resolveStream(track)
+                    DownloadService.enqueue(context, track, resolved, UUID.randomUUID().toString())
+                    snackbar.showSnackbar("Downloading “${track.title}”…")
+                }.onFailure { snackbar.showSnackbar(it.message ?: "Could not start the download.") }
             }
-        )
-    }
+        }
+    )
 
     if (showDeleteCurrent) {
         AlertDialog(
@@ -558,6 +636,7 @@ private fun OffApp() {
 
 @Composable
 private fun HomeScreen(
+    contentPadding: PaddingValues,
     selectedName: String?,
     recentCount: Int,
     onPick: () -> Unit,
@@ -565,7 +644,11 @@ private fun HomeScreen(
     onSearch: () -> Unit
 ) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(contentPadding)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         Card(
@@ -625,6 +708,7 @@ private fun HomeScreen(
 
 @Composable
 private fun EditorScreen(
+    contentPadding: PaddingValues,
     name: String, duration: Int, bitrate: Int, onBitrate: (Int) -> Unit,
     trimStart: Float, onTrimStart: (Float) -> Unit, trimEnd: Float, onTrimEnd: (Float) -> Unit,
     speed: Float, onSpeed: (Float) -> Unit, fadeIn: Float, onFadeIn: (Float) -> Unit,
@@ -633,7 +717,11 @@ private fun EditorScreen(
 ) {
     val maxDuration = duration.coerceAtLeast(1).toFloat()
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 12.dp),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(contentPadding)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -669,7 +757,11 @@ private fun EditorScreen(
                 Text("Export quality", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(128, 192, 256, 320).forEach { kbps ->
-                        FilterChip(selected = bitrate == kbps, onClick = { onBitrate(kbps) }, label = { Text("$kbps") })
+                        AnimatedBitrateChip(
+                            kbps = kbps,
+                            selected = bitrate == kbps,
+                            onSelect = { onBitrate(kbps) }
+                        )
                     }
                 }
                 Text("Speed · ${"%.2f".format(speed)}×", style = MaterialTheme.typography.bodyMedium)
@@ -680,7 +772,7 @@ private fun EditorScreen(
                 Slider(value = fadeIn, onValueChange = onFadeIn, valueRange = 0f..10f, steps = 9)
                 Text("Fade out · ${fadeOut.toInt()} sec", style = MaterialTheme.typography.bodyMedium)
                 Slider(value = fadeOut, onValueChange = onFadeOut, valueRange = 0f..10f, steps = 9)
-                Text("MP3 · $bitrate kbps · Estimated size depends on duration and source.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("MP3 · $bitrate kbps · Settings are remembered next time.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(onClick = onExport, enabled = duration == 0 || trimEnd > trimStart, modifier = Modifier.fillMaxWidth().height(54.dp)) {
                     Icon(Icons.Default.SaveAlt, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Export audio")
                 }
@@ -688,6 +780,22 @@ private fun EditorScreen(
             }
         }
     }
+}
+
+/** Bitrate chip with a springy pop when selected. */
+@Composable
+private fun AnimatedBitrateChip(kbps: Int, selected: Boolean, onSelect: () -> Unit) {
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.08f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "bitrate-scale"
+    )
+    FilterChip(
+        selected = selected,
+        onClick = onSelect,
+        label = { Text("$kbps") },
+        modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale }
+    )
 }
 
 @Composable
@@ -712,8 +820,12 @@ private fun WaveformPreview() {
 }
 
 @Composable
-private fun ProgressScreen(statusMessage: String, failed: Boolean, onCancel: () -> Unit, onRetry: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+private fun ProgressScreen(contentPadding: PaddingValues, statusMessage: String, failed: Boolean, onCancel: () -> Unit, onRetry: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(contentPadding).padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(92.dp)) {
             if (!failed) CircularProgressIndicator(modifier = Modifier.padding(28.dp), strokeCap = StrokeCap.Round)
             else Icon(Icons.Default.AudioFile, contentDescription = null, modifier = Modifier.padding(28.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -732,11 +844,16 @@ private fun ProgressScreen(statusMessage: String, failed: Boolean, onCancel: () 
 
 @Composable
 private fun ResultScreen(
+    contentPadding: PaddingValues,
     name: String, bytes: Long, saved: Boolean, saving: Boolean,
     onSave: () -> Unit, onShare: () -> Unit, onDelete: () -> Unit, onDone: () -> Unit
 ) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(contentPadding)
+            .padding(22.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -772,6 +889,7 @@ private fun ResultScreen(
 
 @Composable
 private fun LibraryScreen(
+    contentPadding: PaddingValues,
     items: List<SavedAudio>,
     onOpen: (SavedAudio) -> Unit,
     onShare: (SavedAudio) -> Unit,
@@ -779,23 +897,38 @@ private fun LibraryScreen(
     onOpenUri: (String) -> Unit,
     onClearDownloads: () -> Unit
 ) {
+    val context = LocalContext.current
     val downloads by DownloadStore.tasks.collectAsState()
-    val finished = downloads.filter { it.status == DownloadStatus.COMPLETED }
-    val active = downloads.filter { it.status == DownloadStatus.RUNNING || it.status == DownloadStatus.QUEUED }
+    val finished = downloads.filter { it.status == DownloadStatus.COMPLETED || it.status == DownloadStatus.FAILED }
+    val active = downloads.filter { DownloadStore.isActive(it.status) }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(contentPadding)
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         if (active.isNotEmpty()) {
             Text("Downloading", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            active.forEach { task -> DownloadRow(task) { } }
+            active.forEach { task ->
+                DownloadRow(
+                    task = task,
+                    onOpen = {},
+                    onPauseResume = {
+                        if (task.status == DownloadStatus.PAUSED) DownloadService.resume(context)
+                        else DownloadService.pause(context)
+                    },
+                    onCancel = { DownloadService.cancel(context) }
+                )
+            }
         }
 
         if (finished.isNotEmpty()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "${finished.size} downloaded",
+                    "${finished.size} in this session",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
@@ -803,7 +936,12 @@ private fun LibraryScreen(
                 OutlinedButton(onClick = onClearDownloads) { Text("Clear list") }
             }
             finished.forEach { task ->
-                DownloadRow(task) { task.savedUri?.let(onOpenUri) }
+                DownloadRow(
+                    task = task,
+                    onOpen = { task.savedUri?.let(onOpenUri) },
+                    onPauseResume = null,
+                    onCancel = null
+                )
             }
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
         }
@@ -847,7 +985,14 @@ private fun LibraryScreen(
 }
 
 @Composable
-private fun DownloadRow(task: DownloadTask, onOpen: () -> Unit) {
+private fun DownloadRow(
+    task: DownloadTask,
+    onOpen: () -> Unit,
+    onPauseResume: (() -> Unit)?,
+    onCancel: (() -> Unit)?
+) {
+    val running = task.status == DownloadStatus.RUNNING
+    val paused = task.status == DownloadStatus.PAUSED
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -864,10 +1009,23 @@ private fun DownloadRow(task: DownloadTask, onOpen: () -> Unit) {
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                if (onPauseResume != null) {
+                    IconButton(onClick = onPauseResume) {
+                        Icon(
+                            if (paused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                            contentDescription = if (paused) "Resume download" else "Pause download"
+                        )
+                    }
+                }
+                if (onCancel != null) {
+                    IconButton(onClick = onCancel) {
+                        Icon(Icons.Default.Close, contentDescription = "Cancel download")
+                    }
+                }
             }
-            val progress = task.progress
-            if (task.status == DownloadStatus.RUNNING) {
+            if (running || paused) {
                 Spacer(Modifier.height(8.dp))
+                val progress = task.progress
                 if (progress != null) {
                     LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
                 } else {
@@ -879,9 +1037,13 @@ private fun DownloadRow(task: DownloadTask, onOpen: () -> Unit) {
 }
 
 @Composable
-private fun SettingsScreen(reducedMotion: Boolean, onReducedMotion: (Boolean) -> Unit, onBack: () -> Unit) {
+private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean, onReducedMotion: (Boolean) -> Unit, onBack: () -> Unit) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(contentPadding)
+            .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -905,7 +1067,7 @@ private fun SettingsScreen(reducedMotion: Boolean, onReducedMotion: (Boolean) ->
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 3.0.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 3.1.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

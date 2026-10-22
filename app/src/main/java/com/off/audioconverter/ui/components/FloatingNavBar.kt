@@ -1,18 +1,19 @@
 package com.off.audioconverter.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -31,8 +33,9 @@ import androidx.compose.ui.unit.dp
 data class NavItem(val label: String, val icon: ImageVector)
 
 /**
- * A floating, pill-shaped navigation bar that hovers above the content instead of
- * being pinned edge-to-edge — the "premium" navigation treatment.
+ * A floating, pill-shaped navigation bar. The selected item grows into a filled
+ * pill with a spring, and every tap has a small press-scale so the interaction
+ * feels physical.
  */
 @Composable
 fun FloatingNavBar(
@@ -41,11 +44,20 @@ fun FloatingNavBar(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val pillSpring = spring<Float>(
+        dampingRatio = Spring.DampingRatioLowBouncy,
+        stiffness = Spring.StiffnessMediumLow
+    )
+    val sizeSpring = spring<androidx.compose.ui.unit.Dp>(
+        dampingRatio = Spring.DampingRatioNoBouncy,
+        stiffness = Spring.StiffnessMedium
+    )
+
     Surface(
         shape = RoundedCornerShape(30.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 6.dp,
-        shadowElevation = 12.dp,
+        tonalElevation = 8.dp,
+        shadowElevation = 14.dp,
         modifier = modifier.fillMaxWidth()
     ) {
         Row(
@@ -55,29 +67,42 @@ fun FloatingNavBar(
         ) {
             items.forEachIndexed { index, item ->
                 val selected = index == selectedIndex
+                val interaction = remember { MutableInteractionSource() }
+                val pressed by interaction.collectIsPressedAsState()
+
+                val pressScale by animateFloatAsState(
+                    targetValue = if (pressed) 0.92f else 1f,
+                    animationSpec = spring(stiffness = Spring.StiffnessHigh),
+                    label = "nav-press"
+                )
                 val container by animateColorAsState(
                     targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer
                     else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    animationSpec = tween(250),
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                     label = "nav-container"
                 )
                 val content by animateColorAsState(
                     targetValue = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.onSurfaceVariant,
-                    animationSpec = tween(250),
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                     label = "nav-content"
                 )
                 val horizontal by animateDpAsState(
-                    targetValue = if (selected) 18.dp else 12.dp,
-                    animationSpec = tween(250),
+                    targetValue = if (selected) 18.dp else 13.dp,
+                    animationSpec = sizeSpring,
                     label = "nav-pad"
                 )
-                val interaction = remember { MutableInteractionSource() }
+
                 Row(
                     modifier = Modifier
+                        .graphicsLayer {
+                            scaleX = pressScale
+                            scaleY = pressScale
+                        }
                         .clip(RoundedCornerShape(22.dp))
                         .background(container)
-                        .clickable(
+                        .selectable(
+                            selected = selected,
                             interactionSource = interaction,
                             indication = null
                         ) { onSelect(index) }
@@ -91,7 +116,17 @@ fun FloatingNavBar(
                         tint = content,
                         modifier = Modifier.size(22.dp)
                     )
-                    if (selected) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = selected,
+                        enter = androidx.compose.animation.fadeIn(animationSpec = pillSpring)
+                            + androidx.compose.animation.expandHorizontally(
+                                animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                            ),
+                        exit = androidx.compose.animation.fadeOut()
+                            + androidx.compose.animation.shrinkHorizontally(
+                                animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                            )
+                    ) {
                         Text(
                             item.label,
                             color = content,
