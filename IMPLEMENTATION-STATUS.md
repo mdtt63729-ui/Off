@@ -85,3 +85,15 @@
   320 and 192 kbps; MP3 is re-encoded with `libmp3lame` and saved to `Music/Off`.
 - **Real LoadingIndicator**: Compose Material3 pinned to 1.4.0 so the Fetch button shows the
   M3 Expressive `LoadingIndicator` (the morphing shape), not a circular spinner.
+
+## v3.7.0 — editor screen rebuilt to the Radhe design
+- The audio editor screen now follows the Radhe Audio Editor layout: a 16:9 header card (a real
+  frame pulled from the selected video), the 0:00 / current / total time row with the current time
+  in the accent colour, a rounded-bar waveform that fills in as it plays, the seek slider, four
+  square shortcut cards, a 64dp circular play button with prev/next, the volume row and a
+  full-width export button.
+- The shortcuts are wired to real actions (Trim = full range, Speed = 1.00x, Fade = 2s each,
+  Reset = everything) rather than being decorative.
+- Live preview playback is kept, so speed, volume and the trim range still apply as you move them.
+- The FFmpeg waveform image was dropped in favour of the design's bar waveform, driven by the real
+  playback position.

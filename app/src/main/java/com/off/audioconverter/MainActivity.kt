@@ -38,6 +38,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -57,6 +59,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.CheckCircle
@@ -154,7 +164,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import com.off.audioconverter.conversion.WaveformGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -215,8 +224,6 @@ private fun OffApp() {
     var showDeleteDialog by remember { mutableStateOf<SavedAudio?>(null) }
     var showDeleteCurrent by remember { mutableStateOf(false) }
     var reducedMotion by remember { mutableStateOf(settings.reducedMotion) }
-    var waveformPath by remember { mutableStateOf<String?>(null) }
-    var waveformLoading by remember { mutableStateOf(false) }
     val history = remember { mutableStateListOf<SavedAudio>().apply { addAll(loadHistory(context)) } }
 
     fun persistHistory() = saveHistory(context, history)
@@ -226,15 +233,6 @@ private fun OffApp() {
         PlayerController.connect(context)
     }
 
-    // Draw a real waveform for whatever video is selected.
-    LaunchedEffect(selectedUri) {
-        val current = selectedUri
-        waveformPath = null
-        if (current == null) return@LaunchedEffect
-        waveformLoading = true
-        waveformPath = WaveformGenerator.generate(context, current, context.cacheDir)?.absolutePath
-        waveformLoading = false
-    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -391,8 +389,6 @@ private fun OffApp() {
                 OffPage.EDITOR -> EditorScreen(
                     contentPadding = contentPadding,
                     uri = selectedUri,
-                    waveformPath = waveformPath,
-                    waveformLoading = waveformLoading,
                     name = selectedName ?: "Selected video",
                     duration = durationSec,
                     bitrate = bitrate,
@@ -756,8 +752,6 @@ private fun HomeScreen(
 private fun EditorScreen(
     contentPadding: PaddingValues,
     uri: Uri?,
-    waveformPath: String?,
-    waveformLoading: Boolean,
     name: String, duration: Int, bitrate: Int, onBitrate: (Int) -> Unit,
     trimStart: Float, onTrimStart: (Float) -> Unit, trimEnd: Float, onTrimEnd: (Float) -> Unit,
     speed: Float, onSpeed: (Float) -> Unit, fadeIn: Float, onFadeIn: (Float) -> Unit,
@@ -771,6 +765,22 @@ private fun EditorScreen(
     val previewPlayer = remember { ExoPlayer.Builder(context).build() }
     var previewPlaying by remember { mutableStateOf(false) }
     var previewPositionMs by remember { mutableLongStateOf(0L) }
+    var artwork by remember { mutableStateOf<ImageBitmap?>(null) }
+
+    // A real frame from the video, cropped 16:9 for the header card.
+    LaunchedEffect(uri) {
+        artwork = null
+        val target = uri ?: return@LaunchedEffect
+        artwork = withContext(Dispatchers.IO) {
+            runCatching {
+                val retriever = MediaMetadataRetriever()
+                retriever.setDataSource(context, target)
+                val frame = retriever.getFrameAtTime(1_000_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                retriever.release()
+                frame?.asImageBitmap()
+            }.getOrNull()
+        }
+    }
 
     DisposableEffect(uri) {
         if (uri != null) {
@@ -789,11 +799,9 @@ private fun EditorScreen(
         }
     }
 
-    // Speed and volume apply to the running player as the sliders move.
     LaunchedEffect(speed) { previewPlayer.setPlaybackParameters(PlaybackParameters(speed)) }
     LaunchedEffect(volume) { previewPlayer.volume = volume.coerceIn(0f, 1.5f) }
 
-    // Keep the position readout fresh and loop inside the selected trim range.
     LaunchedEffect(uri) {
         while (true) {
             previewPositionMs = previewPlayer.currentPosition.coerceAtLeast(0L)
@@ -806,11 +814,8 @@ private fun EditorScreen(
         }
     }
 
-    val waveformBitmap = remember(waveformPath) {
-        waveformPath?.let { path ->
-            runCatching { BitmapFactory.decodeFile(path)?.asImageBitmap() }.getOrNull()
-        }
-    }
+    val totalMs = (trimEnd * 1000).toLong().coerceAtLeast(1L)
+    val played = (previewPositionMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
 
     Column(
         Modifier
@@ -818,149 +823,250 @@ private fun EditorScreen(
             .verticalScroll(rememberScrollState())
             .padding(contentPadding)
             .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.size(52.dp)) {
-                        Icon(Icons.Default.VideoFile, contentDescription = null, modifier = Modifier.padding(13.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text("${formatTime(duration)} · Source stays on device", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-
-                // Real waveform, drawn from the audio itself.
-                when {
-                    waveformBitmap != null -> Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(78.dp)
-                            .clip(MaterialTheme.shapes.large)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                    ) {
-                        Image(
-                            bitmap = waveformBitmap,
-                            contentDescription = "Audio waveform",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.FillBounds
-                        )
-                    }
-                    waveformLoading -> Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(78.dp)
-                            .clip(MaterialTheme.shapes.large)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-                    }
-                    else -> WaveformPreview()
-                }
-
-                // Transport: hear the trim, speed and volume before exporting.
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+        // ---- header: 16:9 artwork, name, format line ----
+        EditorCard {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 ) {
-                    FilledIconButton(
-                        onClick = {
-                            if (previewPlaying) {
-                                previewPlayer.pause()
-                            } else {
-                                val startMs = (trimStart * 1000).toLong()
-                                val endMs = (trimEnd * 1000).toLong()
-                                val position = previewPlayer.currentPosition
-                                if (position < startMs || (endMs > startMs && position >= endMs)) {
-                                    previewPlayer.seekTo(startMs)
-                                }
-                                previewPlayer.play()
-                            }
-                        },
-                        enabled = uri != null,
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
+                    val frame = artwork
+                    if (frame != null) {
+                        Image(
+                            bitmap = frame,
+                            contentDescription = "Video frame",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
                         )
-                    ) {
-                        Icon(
-                            if (previewPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (previewPlaying) "Pause preview" else "Play preview"
-                        )
+                    } else {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.VideoFile,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(44.dp)
+                            )
+                        }
                     }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            if (previewPlaying) "Previewing your edits" else "Preview",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Text(
-                            "${formatTime((previewPositionMs / 1000).toInt())} / ${formatTime(trimEnd.toInt())} · ${"%.2f".format(speed)}× · ${(volume * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = { previewPlayer.seekTo((trimStart * 1000).toLong()) },
-                        enabled = uri != null
-                    ) { Text("Start") }
                 }
                 Text(
-                    "Play to hear it: speed, volume and the trim range are applied live, so you can tune before exporting.",
+                    name,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "${formatTime(duration)} · MP3 · $bitrate kbps",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                Text("Trim range", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("Start · ${formatTime(trimStart.toInt())}", style = MaterialTheme.typography.bodyMedium)
-                Slider(
-                    value = trimStart.coerceIn(0f, (trimEnd - 0.1f).coerceAtLeast(0f)),
-                    onValueChange = { onTrimStart(it.coerceAtMost(trimEnd - 0.1f)) },
-                    valueRange = 0f..maxDuration
-                )
-                Text("End · ${formatTime(trimEnd.toInt())}", style = MaterialTheme.typography.bodyMedium)
-                Slider(
-                    value = trimEnd.coerceIn((trimStart + 0.1f).coerceAtMost(maxDuration), maxDuration),
-                    onValueChange = { onTrimEnd(it.coerceAtLeast(trimStart + 0.1f)) },
-                    valueRange = 0f..maxDuration
-                )
-                Text("Selected length: ${formatTime((trimEnd - trimStart).toInt().coerceAtLeast(0))}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Export quality", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(128, 192, 256, 320).forEach { kbps ->
-                        AnimatedBitrateChip(
-                            kbps = kbps,
-                            selected = bitrate == kbps,
-                            onSelect = { onBitrate(kbps) }
-                        )
-                    }
+        // ---- time labels ----
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(formatTime(0), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+            Text(
+                formatTime((previewPositionMs / 1000).toInt()),
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelSmall
+            )
+            Text(formatTime(trimEnd.toInt()), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+        }
+
+        // ---- waveform: rounded bars, the played part in the accent colour ----
+        EditorCard(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.fillMaxWidth().height(112.dp).padding(horizontal = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                repeat(54) { i ->
+                    val barHeight = (12 + ((i * 17 + i * i * 3) % 72)).dp
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(barHeight)
+                            .clip(CircleShape)
+                            .background(
+                                if (i < (54 * played).toInt()) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outline
+                            )
+                    )
                 }
-                Text("Speed · ${"%.2f".format(speed)}×", style = MaterialTheme.typography.bodyMedium)
-                Slider(value = speed, onValueChange = onSpeed, valueRange = 0.5f..2f, steps = 5)
-                Text("Volume · ${(volume * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
-                Slider(value = volume, onValueChange = onVolume, valueRange = 0f..1.5f, steps = 5)
-                Text("Fade in · ${fadeIn.toInt()} sec", style = MaterialTheme.typography.bodyMedium)
-                Slider(value = fadeIn, onValueChange = onFadeIn, valueRange = 0f..10f, steps = 9)
-                Text("Fade out · ${fadeOut.toInt()} sec", style = MaterialTheme.typography.bodyMedium)
-                Slider(value = fadeOut, onValueChange = onFadeOut, valueRange = 0f..10f, steps = 9)
-                Text("MP3 · $bitrate kbps · Settings are remembered next time.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = onExport, enabled = duration == 0 || trimEnd > trimStart, modifier = Modifier.fillMaxWidth().height(54.dp)) {
-                    Icon(Icons.Default.SaveAlt, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Export audio")
-                }
-                OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Choose a different video") }
             }
+        }
+
+        Slider(
+            value = previewPositionMs.toFloat().coerceIn(0f, totalMs.toFloat()),
+            onValueChange = { previewPlayer.seekTo(it.toLong()) },
+            valueRange = 0f..totalMs.toFloat()
+        )
+
+        // ---- quick tools ----
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            EditorTool(Icons.Default.ContentCut, "Trim", modifier = Modifier.weight(1f)) {
+                onTrimStart(0f); onTrimEnd(maxDuration)
+            }
+            EditorTool(Icons.Default.Speed, "Speed", modifier = Modifier.weight(1f)) { onSpeed(1f) }
+            EditorTool(Icons.Default.GraphicEq, "Fade", modifier = Modifier.weight(1f)) { onFadeIn(2f); onFadeOut(2f) }
+            EditorTool(Icons.Default.RestartAlt, "Reset", modifier = Modifier.weight(1f)) {
+                onTrimStart(0f); onTrimEnd(maxDuration); onSpeed(1f)
+                onFadeIn(0f); onFadeOut(0f); onVolume(1f)
+            }
+        }
+
+        // ---- transport ----
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { previewPlayer.seekTo((trimStart * 1000).toLong()) }) {
+                Icon(Icons.Default.SkipPrevious, contentDescription = "Back to start", tint = MaterialTheme.colorScheme.onSurface)
+            }
+            Spacer(Modifier.width(8.dp))
+            FilledIconButton(
+                onClick = {
+                    if (previewPlaying) {
+                        previewPlayer.pause()
+                    } else {
+                        val startMs = (trimStart * 1000).toLong()
+                        val endMs = (trimEnd * 1000).toLong()
+                        val position = previewPlayer.currentPosition
+                        if (position < startMs || (endMs > startMs && position >= endMs)) {
+                            previewPlayer.seekTo(startMs)
+                        }
+                        previewPlayer.play()
+                    }
+                },
+                enabled = uri != null,
+                modifier = Modifier.size(64.dp),
+                shape = CircleShape
+            ) {
+                Icon(
+                    if (previewPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (previewPlaying) "Pause preview" else "Play preview",
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            IconButton(onClick = { previewPlayer.seekTo((trimEnd * 1000).toLong()) }) {
+                Icon(Icons.Default.SkipNext, contentDescription = "Jump to end", tint = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+
+        Text(
+            "${formatTime((previewPositionMs / 1000).toInt())} / ${formatTime(trimEnd.toInt())} · ${"%.2f".format(speed)}×",
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium
+        )
+
+        // ---- volume ----
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.VolumeUp, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Slider(
+                value = volume,
+                onValueChange = onVolume,
+                valueRange = 0f..1.5f,
+                steps = 5,
+                modifier = Modifier.weight(1f).padding(start = 8.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("${(volume * 100).toInt()}%", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+        }
+
+        // ---- trim range ----
+        Text("Trim range", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text("Start · ${formatTime(trimStart.toInt())}", color = MaterialTheme.colorScheme.onSurface)
+        Slider(
+            value = trimStart.coerceIn(0f, (trimEnd - 0.1f).coerceAtLeast(0f)),
+            onValueChange = { onTrimStart(it.coerceAtMost(trimEnd - 0.1f)) },
+            valueRange = 0f..maxDuration
+        )
+        Text("End · ${formatTime(trimEnd.toInt())}", color = MaterialTheme.colorScheme.onSurface)
+        Slider(
+            value = trimEnd.coerceIn((trimStart + 0.1f).coerceAtMost(maxDuration), maxDuration),
+            onValueChange = { onTrimEnd(it.coerceAtLeast(trimStart + 0.1f)) },
+            valueRange = 0f..maxDuration
+        )
+        Text(
+            "Selected length: ${formatTime((trimEnd - trimStart).toInt().coerceAtLeast(0))}",
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.labelLarge
+        )
+
+        // ---- fades ----
+        Text("Fade in · ${fadeIn.toInt()} sec", color = MaterialTheme.colorScheme.onSurface)
+        Slider(value = fadeIn, onValueChange = onFadeIn, valueRange = 0f..10f, steps = 9)
+        Text("Fade out · ${fadeOut.toInt()} sec", color = MaterialTheme.colorScheme.onSurface)
+        Slider(value = fadeOut, onValueChange = onFadeOut, valueRange = 0f..10f, steps = 9)
+
+        // ---- export ----
+        Text("Export quality", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(128, 192, 256, 320).forEach { kbps ->
+                AnimatedBitrateChip(kbps = kbps, selected = bitrate == kbps, onSelect = { onBitrate(kbps) })
+            }
+        }
+        Text(
+            "MP3 · $bitrate kbps · settings are remembered next time.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Button(
+            onClick = onExport,
+            enabled = duration == 0 || trimEnd > trimStart,
+            modifier = Modifier.fillMaxWidth().height(52.dp)
+        ) {
+            Icon(Icons.Default.FileUpload, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Export audio")
+        }
+        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+            Text("Choose a different video")
+        }
+        Spacer(Modifier.height(10.dp))
+    }
+}
+
+/** The rounded, flat card the editor screens are built from. */
+@Composable
+private fun EditorCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        content = content
+    )
+}
+
+/** One of the small square shortcuts above the transport controls. */
+@Composable
+private fun EditorTool(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    EditorCard(modifier.clickable(onClick = onClick)) {
+        Column(
+            Modifier.fillMaxWidth().padding(vertical = 14.dp, horizontal = 2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Text(label, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
-/** Bitrate chip with a springy pop when selected. */
 @Composable
 private fun AnimatedBitrateChip(kbps: Int, selected: Boolean, onSelect: () -> Unit) {
     val scale by animateFloatAsState(
@@ -1468,7 +1574,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 3.6.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 3.7.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,
