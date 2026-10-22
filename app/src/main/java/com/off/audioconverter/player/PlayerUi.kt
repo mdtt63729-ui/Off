@@ -42,7 +42,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -194,7 +196,12 @@ fun MiniPlayer(
 }
 
 @Composable
-private fun PlayPauseGlyph(buffering: Boolean, isPlaying: Boolean, size: androidx.compose.ui.unit.Dp) {
+private fun PlayPauseGlyph(
+    buffering: Boolean,
+    isPlaying: Boolean,
+    size: androidx.compose.ui.unit.Dp,
+    tint: Color = LocalContentColor.current
+) {
     AnimatedContent(
         targetState = if (buffering) 2 else if (isPlaying) 1 else 0,
         transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
@@ -204,10 +211,10 @@ private fun PlayPauseGlyph(buffering: Boolean, isPlaying: Boolean, size: android
             2 -> CircularProgressIndicator(
                 modifier = Modifier.size(size),
                 strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.onPrimary
+                color = tint
             )
-            1 -> Icon(Icons.Default.Pause, contentDescription = "Pause", modifier = Modifier.size(size))
-            else -> Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(size))
+            1 -> Icon(Icons.Default.Pause, contentDescription = "Pause", tint = tint, modifier = Modifier.size(size))
+            else -> Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = tint, modifier = Modifier.size(size))
         }
     }
 }
@@ -284,16 +291,21 @@ private fun FullPlayerContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onCollapse) {
-                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close player")
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close player", tint = Color.White)
                 }
                 Text(
                     "Now playing",
                     style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
                 IconButton(onClick = { track?.let(onDownload) }, enabled = track != null) {
-                    Icon(Icons.Default.Download, contentDescription = "Download")
+                    Icon(
+                        Icons.Default.Download,
+                        contentDescription = "Download",
+                        tint = Color.White.copy(alpha = if (track != null) 1f else 0.38f)
+                    )
                 }
             }
 
@@ -331,6 +343,7 @@ private fun FullPlayerContent(
                 track?.title ?: "Nothing playing",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
+                color = Color.White,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center
@@ -339,7 +352,7 @@ private fun FullPlayerContent(
             Text(
                 track?.subtitle ?: "",
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color.White.copy(alpha = 0.78f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -354,11 +367,16 @@ private fun FullPlayerContent(
                     scrub = null
                 },
                 enabled = duration > 0,
+                colors = SliderDefaults.colors(
+                    thumbColor = Color.White,
+                    activeTrackColor = Color.White,
+                    inactiveTrackColor = Color.White.copy(alpha = 0.24f)
+                ),
                 modifier = Modifier.fillMaxWidth().graphicsLayer { scaleY = 1f + dragProgress * 0.15f }
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(formatMs(shown.toLong()), style = MaterialTheme.typography.labelMedium)
-                Text(formatMs(duration), style = MaterialTheme.typography.labelMedium)
+                Text(formatMs(shown.toLong()), style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.7f))
+                Text(formatMs(duration), style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.7f))
             }
 
             Spacer(Modifier.height(14.dp))
@@ -373,18 +391,28 @@ private fun FullPlayerContent(
                     enabled = hasPrevious,
                     modifier = Modifier.size(56.dp)
                 ) {
-                    Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", modifier = Modifier.size(36.dp))
+                    Icon(
+                        Icons.Default.SkipPrevious,
+                        contentDescription = "Previous",
+                        tint = Color.White.copy(alpha = if (hasPrevious) 1f else 0.38f),
+                        modifier = Modifier.size(36.dp)
+                    )
                 }
                 Spacer(Modifier.width(22.dp))
                 FilledIconButton(
                     onClick = { PlayerController.togglePlayPause() },
                     modifier = Modifier.size(76.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
+                        containerColor = Color.White,
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    PlayPauseGlyph(buffering = buffering, isPlaying = isPlaying, size = 36.dp)
+                    PlayPauseGlyph(
+                        buffering = buffering,
+                        isPlaying = isPlaying,
+                        size = 36.dp,
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
                 }
                 Spacer(Modifier.width(22.dp))
                 IconButton(
@@ -392,7 +420,12 @@ private fun FullPlayerContent(
                     enabled = hasNext,
                     modifier = Modifier.size(56.dp)
                 ) {
-                    Icon(Icons.Default.SkipNext, contentDescription = "Next", modifier = Modifier.size(36.dp))
+                    Icon(
+                        Icons.Default.SkipNext,
+                        contentDescription = "Next",
+                        tint = Color.White.copy(alpha = if (hasNext) 1f else 0.38f),
+                        modifier = Modifier.size(36.dp)
+                    )
                 }
             }
 
@@ -401,13 +434,13 @@ private fun FullPlayerContent(
             track?.let {
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh
+                    color = Color.White.copy(alpha = 0.12f)
                 ) {
                     Text(
                         "Source · ${it.source.label}" + (it.bitrateKbps?.let { q -> " · ${q}kbps" } ?: ""),
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = Color.White
                     )
                 }
             }
