@@ -29,12 +29,10 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -61,6 +59,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.off.audioconverter.ui.components.MaterialLoadingIndicator
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -69,7 +68,6 @@ import java.util.UUID
  * through NewPipe Extractor first and the Piped API second, so "any video" means
  * any link that either backend can read.
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun VideoDownloadScreen(
     contentPadding: PaddingValues,
@@ -170,11 +168,8 @@ fun VideoDownloadScreen(
             modifier = Modifier.fillMaxWidth().height(52.dp)
         ) {
             if (loading) {
-                // The Material 3 Expressive loading indicator, exactly as shipped.
-                LoadingIndicator(
-                    modifier = Modifier.size(22.dp),
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
+                // The Material Components LoadingIndicator, exactly as shipped.
+                MaterialLoadingIndicator(color = MaterialTheme.colorScheme.onPrimary)
             } else {
                 Icon(Icons.Default.Download, contentDescription = null)
             }

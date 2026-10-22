@@ -64,12 +64,13 @@ dependencies {
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    // Pinned to 1.4.0 for the M3 Expressive LoadingIndicator. It requires
-    // compileSdk 35 / AGP 8.6, both of which this project already has.
-    implementation("androidx.compose.material3:material3:1.4.0")
+    implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.8.5")
     implementation("io.coil-kt:coil-compose:2.7.0")
+
+    // Material Components: provides the M3 Expressive LoadingIndicator view.
+    implementation("com.google.android.material:material:1.13.0")
 
     // Media3 / ExoPlayer: background playback, media session, mini + full player.
     implementation("androidx.media3:media3-exoplayer:1.5.1")

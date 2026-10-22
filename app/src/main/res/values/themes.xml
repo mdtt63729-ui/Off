@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app UI itself is Compose, but Material Components views (the LoadingIndicator
+  on the video screen) require a Material theme on the activity, so this wraps the
+  framework theme. Dark is forced because Off is a dark-only design.
+-->
+<resources>
+    <style name="Theme.Off" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:windowBackground">@color/off_window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>
