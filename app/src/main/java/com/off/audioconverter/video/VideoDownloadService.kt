@@ -64,20 +64,21 @@ object VideoDownloadStore {
 }
 
 /**
- * Downloads a video resolved by [VideoRepository].
+ * Downloads a video, or just its audio.
  *
  * Runs as a `dataSync` foreground service with a determinate progress
- * notification. Muxed streams are written straight out; video-only renditions
- * are paired with the best audio and joined with FFmpeg (`-c copy`, falling
- * back to re-encoding just the audio if the containers disagree).
+ * notification. Three shapes of job:
+ *  - **muxed video** — written straight out;
+ *  - **video-only** — paired with the best audio and joined with FFmpeg;
+ *  - **audio** — saved as-is (M4A), or re-encoded to MP3 with `libmp3lame`.
+ *
+ * Video goes to `Movies/Off`, audio to `Music/Off`.
  */
 class VideoDownloadService : Service() {
 
     private data class Pending(
         val task: VideoDownloadTask,
-        val videoUrl: String,
-        val audioUrl: String?,
-        val mime: String
+        val selection: DownloadSelection
     )
 
     companion object {
@@ -91,17 +92,21 @@ class VideoDownloadService : Service() {
         private const val EXTRA_VIDEO_URL = "videoUrl"
         private const val EXTRA_AUDIO_URL = "audioUrl"
         private const val EXTRA_MIME = "mime"
+        private const val EXTRA_FORMAT = "format"
+        private const val EXTRA_MP3_BITRATE = "mp3Bitrate"
         private const val EXTRA_LABEL = "label"
 
-        fun enqueue(context: Context, info: VideoInfo, quality: VideoQuality, taskId: String) {
+        fun enqueue(context: Context, info: VideoInfo, selection: DownloadSelection, taskId: String) {
             val intent = Intent(context, VideoDownloadService::class.java).apply {
                 putExtra(EXTRA_ID, taskId)
                 putExtra(EXTRA_TITLE, info.title)
                 putExtra(EXTRA_THUMB, info.thumbnailUrl)
-                putExtra(EXTRA_VIDEO_URL, quality.videoUrl)
-                putExtra(EXTRA_AUDIO_URL, quality.audioUrl)
-                putExtra(EXTRA_MIME, quality.mimeType)
-                putExtra(EXTRA_LABEL, quality.label)
+                putExtra(EXTRA_VIDEO_URL, selection.videoUrl)
+                putExtra(EXTRA_AUDIO_URL, selection.audioUrl)
+                putExtra(EXTRA_MIME, selection.sourceMime)
+                putExtra(EXTRA_FORMAT, selection.outputFormat)
+                putExtra(EXTRA_MP3_BITRATE, selection.mp3BitrateKbps ?: -1)
+                putExtra(EXTRA_LABEL, selection.label)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -140,8 +145,10 @@ class VideoDownloadService : Service() {
         }
 
         val taskId = intent?.getStringExtra(EXTRA_ID)
+        val format = intent?.getStringExtra(EXTRA_FORMAT) ?: "mp4"
         val videoUrl = intent?.getStringExtra(EXTRA_VIDEO_URL)
-        if (taskId == null || videoUrl == null) {
+        val audioUrl = intent?.getStringExtra(EXTRA_AUDIO_URL)
+        if (taskId == null || (videoUrl == null && audioUrl == null)) {
             if (pending.isEmpty() && worker?.isActive != true) stopSelf()
             return START_NOT_STICKY
         }
@@ -152,16 +159,17 @@ class VideoDownloadService : Service() {
             label = intent.getStringExtra(EXTRA_LABEL) ?: "",
             thumbnailUrl = intent.getStringExtra(EXTRA_THUMB)
         )
-        VideoDownloadStore.add(task)
-        pending.addLast(
-            Pending(
-                task = task,
-                videoUrl = videoUrl,
-                audioUrl = intent.getStringExtra(EXTRA_AUDIO_URL),
-                mime = intent.getStringExtra(EXTRA_MIME) ?: "video/mp4"
-            )
+        val selection = DownloadSelection(
+            label = task.label,
+            videoUrl = videoUrl,
+            audioUrl = audioUrl,
+            sourceMime = intent.getStringExtra(EXTRA_MIME) ?: "video/mp4",
+            outputFormat = format,
+            mp3BitrateKbps = intent.getIntExtra(EXTRA_MP3_BITRATE, -1).takeIf { it > 0 }
         )
-        startForegroundCompat(buildNotification(task))
+        VideoDownloadStore.add(task)
+        pending.addLast(Pending(task, selection))
+        startForegroundCompat(buildNotification(task, selection))
         if (worker?.isActive != true) {
             worker = scope.launch { drainQueue() }
         }
@@ -179,6 +187,7 @@ class VideoDownloadService : Service() {
 
     private fun runDownload(item: Pending) {
         val task = item.task
+        val selection = item.selection
         currentTask = task
         cancelled = false
         VideoDownloadStore.update(task.id) { it.copy(status = VideoDownloadStatus.RUNNING, stage = "Starting…") }
@@ -187,34 +196,37 @@ class VideoDownloadService : Service() {
         var outputUri: Uri? = null
         var legacyFile: File? = null
         try {
-            val videoExt = if (item.mime.contains("webm")) "webm" else "mp4"
-            val videoFile = File(workDir, "video.$videoExt")
-            downloadToFile(item.videoUrl, videoFile, task, 0f, 0.70f, "Downloading video")
-
-            var finalFile = videoFile
-            if (!item.audioUrl.isNullOrBlank()) {
-                val audioFile = File(workDir, "audio.m4a")
-                downloadToFile(item.audioUrl, audioFile, task, 0.70f, 0.88f, "Downloading audio")
-                finalFile = mux(videoFile, audioFile, workDir, videoExt, task)
+            val finalFile: File = if (selection.isAudio) {
+                downloadAudio(workDir, selection, task)
+            } else {
+                downloadVideo(workDir, selection, task)
             }
 
-            updateProgress(task, 0.97f, "Saving")
+            updateProgress(task, selection, 0.97f, "Saving")
 
-            // The container of the finished file decides the name and MIME type.
-            val finalExt = finalFile.extension.ifBlank { "mp4" }
-            val finalMime = if (finalExt == "webm") "video/webm" else "video/mp4"
-            val name = buildFileName(task.title, finalExt)
+            val extension = finalFile.extension.ifBlank { if (selection.isAudio) "m4a" else "mp4" }
+            val mime = when (extension) {
+                "mp3" -> "audio/mpeg"
+                "m4a", "aac" -> "audio/mp4"
+                "webm" -> if (selection.isAudio) "audio/webm" else "video/webm"
+                else -> if (selection.isAudio) "audio/mp4" else "video/mp4"
+            }
+            val name = buildFileName(task.title, extension)
+            val isAudio = mime.startsWith("audio/")
 
             val resolver = contentResolver
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val collection = if (isAudio) MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                else MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                val relative = (if (isAudio) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_MOVIES) + "/Off"
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                    put(MediaStore.MediaColumns.MIME_TYPE, finalMime)
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/Off")
+                    put(MediaStore.MediaColumns.MIME_TYPE, mime)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relative)
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
-                val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-                    ?: error("Android could not create the video file.")
+                val uri = resolver.insert(collection, values)
+                    ?: error("Android could not create the file.")
                 outputUri = uri
                 resolver.openOutputStream(uri, "w").use { output ->
                     requireNotNull(output) { "Could not open the destination." }
@@ -222,22 +234,24 @@ class VideoDownloadService : Service() {
                 }
                 resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
             } else {
-                val dir = getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: filesDir
+                val dirName = if (isAudio) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_MOVIES
+                val dir = getExternalFilesDir(dirName) ?: filesDir
                 val dest = File(dir, name)
                 finalFile.inputStream().use { input -> FileOutputStream(dest).use { input.copyTo(it) } }
                 legacyFile = dest
             }
 
+            val where = if (isAudio) "Music/Off" else "Movies/Off"
             VideoDownloadStore.update(task.id) {
                 it.copy(
                     status = VideoDownloadStatus.COMPLETED,
                     progress = 1f,
-                    stage = "Saved to Movies/Off",
+                    stage = "Saved to $where",
                     savedName = name,
                     savedUri = outputUri?.toString() ?: legacyFile?.absolutePath
                 )
             }
-            notify(buildDone(task.title, name))
+            notify(buildDone(task.title, name, isAudio))
         } catch (e: Exception) {
             outputUri?.let { runCatching { contentResolver.delete(it, null, null) } }
             legacyFile?.let { runCatching { it.delete() } }
@@ -248,7 +262,7 @@ class VideoDownloadService : Service() {
                     message = if (wasCancelled) "Cancelled" else (e.message ?: "Download failed.")
                 )
             }
-            notify(buildFailed(task.title, if (wasCancelled) "Cancelled" else e.message))
+            notify(buildFailed(task.title, if (wasCancelled) "Cancelled" else e.message, selection.isAudio))
         } finally {
             workDir.deleteRecursively()
             currentTask = null
@@ -256,10 +270,55 @@ class VideoDownloadService : Service() {
         }
     }
 
+    /** Video-only rendition: pair it with the audio and join the two. */
+    private fun downloadVideo(workDir: File, selection: DownloadSelection, task: VideoDownloadTask): File {
+        val videoUrl = selection.videoUrl ?: error("No video stream to download.")
+        val ext = if (selection.sourceMime.contains("webm")) "webm" else "mp4"
+        val videoFile = File(workDir, "video.$ext")
+        downloadToFile(videoUrl, videoFile, task, selection, 0f, 0.70f, "Downloading video")
+
+        val audioUrl = selection.audioUrl
+        if (audioUrl.isNullOrBlank()) return videoFile
+
+        val audioFile = File(workDir, "audio.m4a")
+        downloadToFile(audioUrl, audioFile, task, selection, 0.70f, 0.88f, "Downloading audio")
+        return mux(videoFile, audioFile, workDir, ext, task, selection)
+    }
+
+    /** Audio-only: save the original, or re-encode to MP3. */
+    private fun downloadAudio(workDir: File, selection: DownloadSelection, task: VideoDownloadTask): File {
+        val audioUrl = selection.audioUrl ?: selection.videoUrl ?: error("No audio stream to download.")
+        val sourceExt = when {
+            selection.sourceMime.contains("webm") -> "webm"
+            selection.sourceMime.contains("mpeg") -> "mp3"
+            else -> "m4a"
+        }
+        val source = File(workDir, "audio.$sourceExt")
+        downloadToFile(audioUrl, source, task, selection, 0f, 0.82f, "Downloading audio")
+
+        if (selection.outputFormat != "mp3") return source
+
+        updateProgress(task, selection, 0.88f, "Converting to MP3")
+        val bitrate = selection.mp3BitrateKbps ?: 320
+        val mp3 = File(workDir, "audio.mp3")
+        val session = FFmpegKit.executeWithArguments(
+            arrayOf(
+                "-y", "-i", source.absolutePath,
+                "-vn", "-codec:a", "libmp3lame", "-b:a", "${bitrate}k",
+                "-f", "mp3", mp3.absolutePath
+            )
+        )
+        if (!ReturnCode.isSuccess(session.returnCode) || !mp3.exists() || mp3.length() == 0L) {
+            error("Could not convert the audio to MP3. Try the M4A option instead.")
+        }
+        return mp3
+    }
+
     private fun downloadToFile(
         url: String,
         target: File,
         task: VideoDownloadTask,
+        selection: DownloadSelection,
         from: Float,
         to: Float,
         stage: String
@@ -268,7 +327,7 @@ class VideoDownloadService : Service() {
             connectTimeout = 15000
             readTimeout = 30000
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "Off-Android/3.4.0")
+            setRequestProperty("User-Agent", "Off-Android/3.6.0")
         }
         try {
             connection.connect()
@@ -277,7 +336,7 @@ class VideoDownloadService : Service() {
             val total = connection.contentLengthLong
             connection.inputStream.use { input ->
                 FileOutputStream(target).use { output ->
-                    copyWithProgress(input, output, total, task, from, to, stage)
+                    copyWithProgress(input, output, total, task, selection, from, to, stage)
                 }
             }
         } finally {
@@ -290,6 +349,7 @@ class VideoDownloadService : Service() {
         output: OutputStream,
         total: Long,
         task: VideoDownloadTask,
+        selection: DownloadSelection,
         from: Float,
         to: Float,
         stage: String
@@ -307,10 +367,10 @@ class VideoDownloadService : Service() {
                 val step = (fraction * 100).toInt()
                 if (step != lastStep) {
                     lastStep = step
-                    updateProgress(task, fraction.coerceIn(0f, 1f), "$stage · $step%")
+                    updateProgress(task, selection, fraction.coerceIn(0f, 1f), "$stage · $step%")
                 }
             } else {
-                updateProgress(task, null, "$stage · ${formatBytes(done)}")
+                updateProgress(task, selection, null, "$stage · ${formatBytes(done)}")
             }
             read = input.read(buffer)
         }
@@ -321,8 +381,15 @@ class VideoDownloadService : Service() {
      * Joins video and audio and returns the finished file. Tries a stream copy
      * first; if the containers disagree, re-encodes only the audio into an MP4.
      */
-    private fun mux(video: File, audio: File, workDir: File, videoExt: String, task: VideoDownloadTask): File {
-        updateProgress(task, 0.90f, "Joining video and audio")
+    private fun mux(
+        video: File,
+        audio: File,
+        workDir: File,
+        videoExt: String,
+        task: VideoDownloadTask,
+        selection: DownloadSelection
+    ): File {
+        updateProgress(task, selection, 0.90f, "Joining video and audio")
         val container = if (videoExt == "webm") "webm" else "mp4"
         val copied = File(workDir, "joined.$container")
 
@@ -351,9 +418,9 @@ class VideoDownloadService : Service() {
         error("Could not join the video and audio streams. Try a different quality.")
     }
 
-    private fun updateProgress(task: VideoDownloadTask, progress: Float?, stage: String) {
+    private fun updateProgress(task: VideoDownloadTask, selection: DownloadSelection, progress: Float?, stage: String) {
         VideoDownloadStore.update(task.id) { it.copy(progress = progress, stage = stage) }
-        notify(buildNotification(task.copy(progress = progress, stage = stage)))
+        notify(buildNotification(task.copy(progress = progress, stage = stage), selection))
     }
 
     /* ------------------------------- notifications ------------------------------ */
@@ -364,7 +431,7 @@ class VideoDownloadService : Service() {
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "Video downloads", NotificationManager.IMPORTANCE_LOW)
-                .apply { description = "Progress for video downloads started in Off" }
+                .apply { description = "Progress for downloads started in Off" }
         )
     }
 
@@ -373,7 +440,7 @@ class VideoDownloadService : Service() {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
-    private fun buildNotification(task: VideoDownloadTask): Notification {
+    private fun buildNotification(task: VideoDownloadTask, selection: DownloadSelection): Notification {
         val percent = ((task.progress ?: 0f) * 100).toInt().coerceIn(0, 100)
         val cancel = NotificationCompat.Action.Builder(
             android.R.drawable.ic_menu_close_clear_cancel, "Cancel",
@@ -387,7 +454,7 @@ class VideoDownloadService : Service() {
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(task.title)
             .setContentText(task.stage ?: "Preparing…")
-            .setSubText("Off · video")
+            .setSubText(if (selection.isAudio) "Off · audio" else "Off · video")
             .setProgress(100, percent, task.progress == null)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -397,20 +464,23 @@ class VideoDownloadService : Service() {
             .build()
     }
 
-    private fun buildDone(title: String, name: String): Notification =
+    private fun buildDone(title: String, name: String, isAudio: Boolean): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Saved: $title")
-            .setContentText("Video complete · $name")
+            .setContentText("${if (isAudio) "Audio" else "Video"} complete · $name")
             .setOngoing(false)
             .setAutoCancel(true)
             .setContentIntent(contentIntent())
             .build()
 
-    private fun buildFailed(title: String, reason: String?): Notification =
+    private fun buildFailed(title: String, reason: String?, isAudio: Boolean): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_error)
-            .setContentTitle(if (reason == "Cancelled") "Download cancelled" else "Video download failed")
+            .setContentTitle(
+                if (reason == "Cancelled") "Download cancelled"
+                else if (isAudio) "Audio download failed" else "Video download failed"
+            )
             .setContentText("$title — ${reason ?: "unknown error"}")
             .setOngoing(false)
             .setAutoCancel(true)
@@ -445,7 +515,7 @@ class VideoDownloadService : Service() {
             .replace(Regex("\\s+"), " ")
             .trim()
             .take(90)
-            .ifBlank { "Off Video" }
+            .ifBlank { "Off Audio" }
         return "$base.$extension"
     }
 

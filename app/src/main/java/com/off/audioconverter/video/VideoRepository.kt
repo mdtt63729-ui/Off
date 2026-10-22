@@ -134,7 +134,9 @@ class VideoRepository {
             uploader = info.uploaderName ?: "Unknown",
             durationSec = info.duration.coerceAtLeast(0L),
             thumbnailUrl = info.thumbnails.lastOrNull()?.url,
+            description = runCatching { info.description?.content }.getOrNull().orEmpty(),
             qualities = qualities.sortedByDescending { it.height },
+            audioOptions = audioOptionsFrom(bestAudio?.url, bestAudio?.format?.mimeType),
             source = source
         )
     }

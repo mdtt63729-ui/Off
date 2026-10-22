@@ -1,13 +1,17 @@
 package com.off.audioconverter.video
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,14 +25,16 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -39,6 +45,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -46,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -57,13 +65,14 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 /**
- * Download a video by pasting its link. Resolution goes through NewPipe
- * Extractor first and the Piped API second, so "any video" means any YouTube
- * link that either backend can read.
+ * Download a video — or just its audio — by pasting a link. Resolution goes
+ * through NewPipe Extractor first and the Piped API second, so "any video" means
+ * any link that either backend can read.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun VideoDownloadScreen(
-    contentPadding: androidx.compose.foundation.layout.PaddingValues,
+    contentPadding: PaddingValues,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -73,7 +82,9 @@ fun VideoDownloadScreen(
 
     var link by remember { mutableStateOf("") }
     var info by remember { mutableStateOf<VideoInfo?>(null) }
-    var selected by remember { mutableStateOf<VideoQuality?>(null) }
+    var mode by remember { mutableIntStateOf(0) }          // 0 = video, 1 = audio
+    var quality by remember { mutableStateOf<VideoQuality?>(null) }
+    var audio by remember { mutableStateOf<AudioOption?>(null) }
     var loading by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
 
@@ -83,16 +94,42 @@ fun VideoDownloadScreen(
         loading = true
         notice = null
         info = null
-        selected = null
         scope.launch {
             runCatching { repository.resolve(text) }
                 .onSuccess {
                     info = it
-                    selected = it.best
-                    if (it.qualities.isEmpty()) notice = "This video has no downloadable streams."
+                    quality = it.best
+                    audio = it.audioOptions.firstOrNull()
+                    mode = 0
+                    if (it.qualities.isEmpty() && it.audioOptions.isEmpty()) {
+                        notice = "This video has no downloadable streams."
+                    }
                 }
                 .onFailure { notice = it.message ?: "Could not read that link." }
             loading = false
+        }
+    }
+
+    val selection: DownloadSelection? = if (mode == 0) {
+        quality?.let {
+            DownloadSelection(
+                label = it.label,
+                videoUrl = it.videoUrl,
+                audioUrl = it.audioUrl,
+                sourceMime = it.mimeType,
+                outputFormat = if (it.mimeType.contains("webm")) "webm" else "mp4"
+            )
+        }
+    } else {
+        audio?.let {
+            DownloadSelection(
+                label = it.label,
+                videoUrl = null,
+                audioUrl = it.url,
+                sourceMime = it.sourceMime,
+                outputFormat = it.outputFormat,
+                mp3BitrateKbps = it.mp3BitrateKbps
+            )
         }
     }
 
@@ -104,17 +141,6 @@ fun VideoDownloadScreen(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(
-            "Download a video",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            "Paste a YouTube link. The video is resolved on your device with NewPipe Extractor, with the Piped API as a fallback.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
         OutlinedTextField(
             value = link,
             onValueChange = { link = it },
@@ -143,109 +169,199 @@ fun VideoDownloadScreen(
             enabled = !loading && link.isNotBlank(),
             modifier = Modifier.fillMaxWidth().height(52.dp)
         ) {
-            if (loading) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            else Icon(Icons.Default.Download, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
+            if (loading) {
+                // The Material 3 Expressive loading indicator, exactly as shipped.
+                LoadingIndicator(
+                    modifier = Modifier.size(22.dp),
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            } else {
+                Icon(Icons.Default.Download, contentDescription = null)
+            }
+            Spacer(Modifier.width(10.dp))
             Text(if (loading) "Reading the link…" else "Fetch video")
         }
 
         info?.let { video ->
             Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            modifier = Modifier.size(96.dp)
-                        ) {
-                            if (video.thumbnailUrl != null) {
-                                AsyncImage(
-                                    model = video.thumbnailUrl,
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp))
-                                )
-                            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+                    // 16:9 thumbnail, edge to edge inside the card.
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                            .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+                    ) {
+                        if (video.thumbnailUrl != null) {
+                            AsyncImage(
+                                model = video.thumbnailUrl,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Box(
+                                Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
                                 Icon(
                                     Icons.Default.Movie,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    modifier = Modifier.padding(26.dp)
+                                    modifier = Modifier.size(48.dp)
                                 )
                             }
                         }
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                video.title,
-                                style = MaterialTheme.typography.titleSmall,
-                                maxLines = 3,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(Modifier.height(2.dp))
+                    }
+
+                    Column(
+                        Modifier.padding(horizontal = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            video.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 video.uploader,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
-                            Spacer(Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Badge("via ${video.source}")
-                                if (video.durationSec > 0) {
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        formatDuration(video.durationSec),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                            Spacer(Modifier.width(8.dp))
+                            Badge("via ${video.source}")
+                            if (video.durationSec > 0) {
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    formatDuration(video.durationSec),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
 
-                    if (video.qualities.isNotEmpty()) {
-                        Text("Quality", style = MaterialTheme.typography.titleSmall)
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            video.qualities.chunked(4).forEach { row ->
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    row.forEach { quality ->
-                                        FilterChip(
-                                            selected = selected == quality,
-                                            onClick = { selected = quality },
-                                            label = { Text(quality.label) }
-                                        )
+                    // The video's description, where the quality chips used to sit.
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+                    ) {
+                        Text(
+                            video.description.ifBlank { "This video has no description." },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 7,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .padding(12.dp)
+                                .heightIn(max = 180.dp)
+                        )
+                    }
+
+                    // Then the format, and the qualities beneath it.
+                    Column(
+                        Modifier.padding(horizontal = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Download as", style = MaterialTheme.typography.titleSmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = mode == 0,
+                                onClick = { mode = 0 },
+                                label = { Text("Video") },
+                                leadingIcon = { Icon(Icons.Default.Movie, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            )
+                            FilterChip(
+                                selected = mode == 1,
+                                onClick = { mode = 1 },
+                                enabled = video.audioOptions.isNotEmpty(),
+                                label = { Text("Audio") },
+                                leadingIcon = { Icon(Icons.Default.MusicNote, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            )
+                        }
+
+                        Text(
+                            if (mode == 0) "Quality" else "Audio format",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+
+                        if (mode == 0) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                video.qualities.chunked(4).forEach { row ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        row.forEach { option ->
+                                            FilterChip(
+                                                selected = quality == option,
+                                                onClick = { quality = option },
+                                                label = { Text(option.label) }
+                                            )
+                                        }
                                     }
                                 }
                             }
-                        }
-                        selected?.let { quality ->
-                            Text(
-                                if (quality.muxed) {
-                                    "This rendition already contains audio — saved straight to an MP4."
-                                } else {
-                                    "Video and audio arrive separately and are joined with FFmpeg after download."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            quality?.let { option ->
+                                Text(
+                                    if (option.muxed) {
+                                        "This rendition already contains audio — saved straight out."
+                                    } else {
+                                        "Video and audio arrive separately and are joined with FFmpeg after download."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                video.audioOptions.forEach { option ->
+                                    FilterChip(
+                                        selected = audio == option,
+                                        onClick = { audio = option },
+                                        label = { Text(option.label) }
+                                    )
+                                }
+                            }
+                            audio?.let { option ->
+                                Text(
+                                    if (option.outputFormat == "mp3") {
+                                        "The audio is re-encoded to MP3 (${option.mp3BitrateKbps} kbps) after download and saved to Music/Off."
+                                    } else {
+                                        "The original audio stream is saved untouched to Music/Off."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
 
                     Button(
                         onClick = {
-                            val quality = selected ?: video.best ?: return@Button
-                            VideoDownloadService.enqueue(
-                                context, video, quality, UUID.randomUUID().toString()
-                            )
+                            val chosen = selection ?: return@Button
+                            VideoDownloadService.enqueue(context, video, chosen, UUID.randomUUID().toString())
                             notice = "Downloading “${video.title}” — watch the notification for progress."
                         },
-                        enabled = selected != null,
-                        modifier = Modifier.fillMaxWidth().height(50.dp)
+                        enabled = selection != null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp)
+                            .padding(bottom = 14.dp)
+                            .height(50.dp)
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Download ${selected?.label ?: ""}".trim())
+                        Text(
+                            "Download ${selection?.label ?: ""}".trim(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }
@@ -254,7 +370,7 @@ fun VideoDownloadScreen(
         if (downloads.isNotEmpty()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Video downloads",
+                    "Downloads",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
@@ -271,7 +387,9 @@ fun VideoDownloadScreen(
                                 modifier = Modifier.size(44.dp)
                             ) {
                                 Icon(
-                                    Icons.Default.Movie,
+                                    if (task.label.contains("MP3", ignoreCase = true) ||
+                                        task.label.contains("M4A", ignoreCase = true)
+                                    ) Icons.Default.MusicNote else Icons.Default.Movie,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.onTertiaryContainer,
                                     modifier = Modifier.padding(10.dp)
@@ -347,7 +465,7 @@ fun VideoDownloadScreen(
                     )
                     Text("Paste any supported link", fontWeight = FontWeight.SemiBold)
                     Text(
-                        "YouTube works in every shape — watch, youtu.be, shorts, live and embed — and the sites NewPipe handles (PeerTube, SoundCloud, Bandcamp) work too. Video-only renditions are joined with the audio automatically.",
+                        "YouTube works in every shape — watch, youtu.be, shorts, live and embed — and the sites NewPipe handles (PeerTube, SoundCloud, Bandcamp) work too. Download it as video, or as MP3 / M4A audio.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

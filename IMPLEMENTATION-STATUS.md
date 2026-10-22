@@ -73,3 +73,15 @@
   instead of the placeholder bars (kept as a fallback).
 - **Page padding**: pages without the navigation bar no longer reserve its height, so the editor
   is not cut off and does not end in a large empty gap.
+
+## v3.6.0 — video card, audio downloads, real LoadingIndicator, nav bar
+- **Nav bar fixed**: the selected pill used to be drawn per item, so mid-switch TWO pills were
+  on screen and their labels crossed over each other (the garbled "Studio/Search"). There is now
+  a single indicator whose offset and width come from the same animated item widths, so it tracks
+  the items exactly.
+- **Video card redesigned**: the thumbnail is 16:9 across the card, the video's description sits
+  where the quality chips were, and the quality chips are below the description.
+- **Audio downloads**: "Download as → Video / Audio". Audio offers the original M4A plus MP3 at
+  320 and 192 kbps; MP3 is re-encoded with `libmp3lame` and saved to `Music/Off`.
+- **Real LoadingIndicator**: Compose Material3 pinned to 1.4.0 so the Fetch button shows the
+  M3 Expressive `LoadingIndicator` (the morphing shape), not a circular spinner.

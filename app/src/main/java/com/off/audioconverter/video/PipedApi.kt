@@ -39,6 +39,7 @@ object PipedApi {
         val audio = json.optJSONArray("audioStreams") ?: JSONArray()
 
         var bestAudioUrl: String? = null
+        var bestAudioMime: String? = null
         var bestAudioBitrate = -1
         for (i in 0 until audio.length()) {
             val item = audio.optJSONObject(i) ?: continue
@@ -48,6 +49,7 @@ object PipedApi {
             if (bitrate > bestAudioBitrate) {
                 bestAudioBitrate = bitrate
                 bestAudioUrl = url
+                bestAudioMime = item.optString("mimeType").takeIf { it.isNotBlank() }
             }
         }
 
@@ -95,7 +97,9 @@ object PipedApi {
             uploader = json.optString("uploader").ifBlank { "Unknown" },
             durationSec = json.optLong("duration", 0L),
             thumbnailUrl = json.optString("thumbnailUrl").takeIf { it.startsWith("http") },
+            description = json.optString("description"),
             qualities = qualities.sortedByDescending { it.height },
+            audioOptions = audioOptionsFrom(bestAudioUrl, bestAudioMime),
             source = base.removePrefix("https://")
         )
     }

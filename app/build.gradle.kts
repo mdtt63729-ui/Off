@@ -12,8 +12,8 @@ android {
         applicationId = "com.off.audioconverter"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "3.5.0"
+        versionCode = 11
+        versionName = "3.6.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }
@@ -64,7 +64,9 @@ dependencies {
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
+    // Pinned to 1.4.0 for the M3 Expressive LoadingIndicator. It requires
+    // compileSdk 35 / AGP 8.6, both of which this project already has.
+    implementation("androidx.compose.material3:material3:1.4.0")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.8.5")
     implementation("io.coil-kt:coil-compose:2.7.0")

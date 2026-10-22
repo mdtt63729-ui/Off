@@ -13,6 +13,16 @@ data class VideoQuality(
     val sizeBytes: Long? = null
 )
 
+/** An audio-only download: the source audio, optionally re-encoded to MP3. */
+data class AudioOption(
+    val label: String,
+    val url: String,
+    /** "mp3" re-encodes with FFmpeg; "m4a" saves the original audio untouched. */
+    val outputFormat: String,
+    val mp3BitrateKbps: Int?,
+    val sourceMime: String
+)
+
 /** Everything the download screen needs about a pasted link. */
 data class VideoInfo(
     val id: String,
@@ -20,11 +30,26 @@ data class VideoInfo(
     val uploader: String,
     val durationSec: Long,
     val thumbnailUrl: String?,
+    val description: String,
     val qualities: List<VideoQuality>,
+    val audioOptions: List<AudioOption>,
     /** Which backend answered: "NewPipe" or a Piped instance host. */
     val source: String
 ) {
     val best: VideoQuality? get() = qualities.firstOrNull()
+}
+
+/** What the user picked to download. */
+data class DownloadSelection(
+    val label: String,
+    val videoUrl: String?,
+    val audioUrl: String?,
+    val sourceMime: String,
+    /** "mp4", "webm", "mp3" or "m4a". */
+    val outputFormat: String,
+    val mp3BitrateKbps: Int? = null
+) {
+    val isAudio: Boolean get() = outputFormat == "mp3" || outputFormat == "m4a"
 }
 
 /** A download in flight or finished. */
@@ -71,3 +96,17 @@ fun extractVideoId(input: String): String? {
 
 /** Canonical watch URL for an id. */
 fun watchUrl(videoId: String): String = "https://www.youtube.com/watch?v=$videoId"
+
+/**
+ * The audio choices offered for every video: the original audio untouched, plus
+ * two MP3 re-encodes. All three read from the best audio stream available.
+ */
+fun audioOptionsFrom(bestAudioUrl: String?, sourceMime: String?): List<AudioOption> {
+    if (bestAudioUrl.isNullOrBlank()) return emptyList()
+    val mime = sourceMime ?: "audio/mp4"
+    return listOf(
+        AudioOption("M4A · original", bestAudioUrl, outputFormat = "m4a", mp3BitrateKbps = null, sourceMime = mime),
+        AudioOption("MP3 · 320 kbps", bestAudioUrl, outputFormat = "mp3", mp3BitrateKbps = 320, sourceMime = mime),
+        AudioOption("MP3 · 192 kbps", bestAudioUrl, outputFormat = "mp3", mp3BitrateKbps = 192, sourceMime = mime)
+    )
+}
