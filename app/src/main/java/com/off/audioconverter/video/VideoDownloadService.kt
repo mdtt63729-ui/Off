@@ -21,6 +21,7 @@ import androidx.core.app.ServiceCompat
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
 import com.off.audioconverter.MainActivity
+import com.off.audioconverter.ui.CrashLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,11 +37,12 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
-import java.net.URL
+import java.util.concurrent.ThreadFactory
 
-/** Observable registry of video downloads, mirroring the music download store. */
+/** Observable registry of video downloads. */
 object VideoDownloadStore {
     private val _tasks = MutableStateFlow<List<VideoDownloadTask>>(emptyList())
     val tasks: StateFlow<List<VideoDownloadTask>> = _tasks.asStateFlow()
@@ -53,17 +55,23 @@ object VideoDownloadStore {
         _tasks.update { list -> list.map { if (it.id == id) transform(it) else it } }
     }
 
+    fun remove(id: String) {
+        _tasks.update { list -> list.filterNot { it.id == id } }
+    }
+
+    fun find(id: String): VideoDownloadTask? = _tasks.value.firstOrNull { it.id == id }
+
     fun isActive(status: VideoDownloadStatus): Boolean =
-        status == VideoDownloadStatus.QUEUED || status == VideoDownloadStatus.RUNNING
+        status == VideoDownloadStatus.QUEUED || status == VideoDownloadStatus.RUNNING ||
+            status == VideoDownloadStatus.PAUSED
 
     fun clearFinished() {
         _tasks.update { list -> list.filter { isActive(it.status) } }
     }
-
-    fun remove(id: String) {
-        _tasks.update { list -> list.filterNot { it.id == id } }
-    }
 }
+
+/** Thrown to unwind a download when the user asked for a pause. */
+private class DownloadPaused : Exception("Paused")
 
 /**
  * Downloads a video, or just its audio.
@@ -72,22 +80,20 @@ object VideoDownloadStore {
  * notification. Three shapes of job:
  *  - **muxed video** — written straight out;
  *  - **video-only** — paired with the best audio and joined with FFmpeg;
- *  - **audio** — saved as-is (M4A), or re-encoded to MP3 with `libmp3lame`.
+ *  - **yt-dlp** — yt-dlp fetches the file itself, on a worker thread.
  *
- * Video goes to `Movies/Off`, audio to `Music/Off`.
+ * Every entry point is defensive: a failure marks the download failed and shows
+ * why, rather than letting an exception escape and take the process down.
  */
 class VideoDownloadService : Service() {
 
-    private data class Pending(
-        val task: VideoDownloadTask,
-        val selection: DownloadSelection
-    )
+    private data class Pending(val task: VideoDownloadTask, val selection: DownloadSelection, val resume: Boolean)
 
     companion object {
         private const val CHANNEL_ID = "off_video_downloads"
         private const val NOTIFICATION_ID = 4720
         const val ACTION_CANCEL = "com.off.audioconverter.video.CANCEL"
-
+        private const val ACTION_RESUME = "com.off.audioconverter.video.RESUME"
         private const val EXTRA_ID = "id"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_THUMB = "thumb"
@@ -103,6 +109,8 @@ class VideoDownloadService : Service() {
         /** yt-dlp's intermediate parts, e.g. name.f137.mp4, which are not the result. */
         private val INTERMEDIATE_PART = Regex("\\.f\\d+\\.")
 
+        @Volatile private var instance: VideoDownloadService? = null
+
         fun enqueue(context: Context, info: VideoInfo, selection: DownloadSelection, taskId: String) {
             val intent = Intent(context, VideoDownloadService::class.java).apply {
                 putExtra(EXTRA_ID, taskId)
@@ -117,18 +125,65 @@ class VideoDownloadService : Service() {
                 putExtra(EXTRA_PAGE_URL, selection.pageUrl)
                 putExtra(EXTRA_YTDLP_SELECTOR, selection.ytDlpSelector)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
+            startForeground(context, intent)
+        }
+
+        /** Pauses a running download, or parks a queued one. */
+        fun pause(context: Context, taskId: String) {
+            val service = instance
+            if (service != null && service.currentTask?.id == taskId) {
+                service.pauseRequested = true
             } else {
-                context.startService(intent)
+                VideoDownloadStore.update(taskId) { it.copy(status = VideoDownloadStatus.PAUSED, stage = "Paused · tap to resume") }
             }
         }
 
+        /** Resumes a paused download, continuing from the bytes already on disk. */
+        fun resume(context: Context, taskId: String) {
+            val task = VideoDownloadStore.find(taskId) ?: return
+            val selection = task.selection ?: return
+            VideoDownloadStore.update(taskId) { it.copy(status = VideoDownloadStatus.QUEUED, stage = "Resuming…") }
+            val service = instance
+            if (service != null) {
+                service.enqueue(task.copy(status = VideoDownloadStatus.QUEUED), selection, resume = true)
+            } else {
+                val intent = Intent(context, VideoDownloadService::class.java).apply {
+                    setAction(ACTION_RESUME)
+                    putExtra(EXTRA_ID, taskId)
+                }
+                startForeground(context, intent)
+            }
+        }
+
+        /** Stops the download and forgets it, partial file and all. */
+        fun delete(context: Context, taskId: String) {
+            val task = VideoDownloadStore.find(taskId)
+            val service = instance
+            if (service != null && service.currentTask?.id == taskId) {
+                service.cancelled = true
+                service.discardWorkDir = true
+            }
+            task?.workDir?.let { runCatching { File(it).deleteRecursively() } }
+            VideoDownloadStore.remove(taskId)
+        }
+
         fun cancel(context: Context) {
+            val service = instance
+            if (service != null) {
+                service.cancelled = true
+                service.discardWorkDir = true
+            } else {
+                runCatching { context.startService(Intent(context, VideoDownloadService::class.java).setAction(ACTION_CANCEL)) }
+            }
+        }
+
+        private fun startForeground(context: Context, intent: Intent) {
             runCatching {
-                context.startService(
-                    Intent(context, VideoDownloadService::class.java).setAction(ACTION_CANCEL)
-                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+                else context.startService(intent)
+            }.onFailure {
+                // If the system refuses to start us, say so instead of dying silently.
+                CrashLog.record(context, "Could not start the download service", it)
             }
         }
     }
@@ -138,18 +193,51 @@ class VideoDownloadService : Service() {
     private var worker: Job? = null
 
     @Volatile private var cancelled = false
+    @Volatile private var pauseRequested = false
+    @Volatile private var discardWorkDir = false
     @Volatile private var currentTask: VideoDownloadTask? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
+        CrashLog.install(applicationContext)
         createChannel()
     }
 
+    override fun onDestroy() {
+        instance = null
+        scope.cancel()
+        super.onDestroy()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        try {
+            return handleCommand(intent)
+        } catch (t: Throwable) {
+            CrashLog.record(this, "Download service failed to start", t)
+            runCatching { stopSelf() }
+            return START_NOT_STICKY
+        }
+    }
+
+    private fun handleCommand(intent: Intent?): Int {
         if (intent?.action == ACTION_CANCEL) {
             cancelled = true
+            discardWorkDir = true
+            return START_NOT_STICKY
+        }
+
+        if (intent?.action == ACTION_RESUME) {
+            val id = intent.getStringExtra(EXTRA_ID)
+            val task = id?.let { VideoDownloadStore.find(it) }
+            val selection = task?.selection
+            if (task == null || selection == null) {
+                if (pending.isEmpty() && worker?.isActive != true) stopSelf()
+                return START_NOT_STICKY
+            }
+            enqueue(task, selection, resume = true)
             return START_NOT_STICKY
         }
 
@@ -179,20 +267,33 @@ class VideoDownloadService : Service() {
             ytDlpSelector = intent.getStringExtra(EXTRA_YTDLP_SELECTOR)
         )
         VideoDownloadStore.add(task)
-        pending.addLast(Pending(task, selection))
-        startForegroundCompat(buildNotification(task, selection))
+        enqueue(task, selection, resume = false)
+        return START_NOT_STICKY
+    }
+
+    private fun enqueue(task: VideoDownloadTask, selection: DownloadSelection, resume: Boolean) {
+        pending.addLast(Pending(task, selection, resume))
+        // getForegroundServiceType must be answered promptly, so post the notification first.
+        startForegroundCompat(buildNotification(task, selection, resume))
         if (worker?.isActive != true) {
             worker = scope.launch { drainQueue() }
         }
-        return START_NOT_STICKY
     }
 
     private suspend fun drainQueue() {
         while (true) {
             val item = pending.removeFirstOrNull() ?: break
-            runDownload(item)
+            try {
+                runDownload(item)
+            } catch (t: Throwable) {
+                // Nothing may escape here: an uncaught throw on this thread would kill the app.
+                CrashLog.record(this, "Download crashed", t)
+                VideoDownloadStore.update(item.task.id) {
+                    it.copy(status = VideoDownloadStatus.FAILED, message = t.message ?: "Download failed.")
+                }
+            }
         }
-        stopForegroundCompat()
+        runCatching { stopForegroundCompat() }
         stopSelf()
     }
 
@@ -201,11 +302,25 @@ class VideoDownloadService : Service() {
         val selection = item.selection
         currentTask = task
         cancelled = false
-        VideoDownloadStore.update(task.id) { it.copy(status = VideoDownloadStatus.RUNNING, stage = "Starting…") }
+        pauseRequested = false
+        discardWorkDir = false
 
-        val workDir = File(cacheDir, "off_video_${System.currentTimeMillis()}").apply { mkdirs() }
+        val workDir = task.workDir?.let { File(it) }?.takeIf { it.isDirectory }
+            ?: File(cacheDir, "off_video_${System.currentTimeMillis()}")
+        workDir.mkdirs()
+
+        VideoDownloadStore.update(task.id) {
+            it.copy(
+                status = VideoDownloadStatus.RUNNING,
+                stage = if (item.resume) "Resuming…" else "Starting…",
+                workDir = workDir.absolutePath,
+                selection = selection
+            )
+        }
+
         var outputUri: Uri? = null
         var legacyFile: File? = null
+        var keepWorkDir = false
         try {
             val finalFile: File = when {
                 // yt-dlp fetches the file itself: the streams often need headers or
@@ -228,7 +343,6 @@ class VideoDownloadService : Service() {
             val name = buildFileName(task.title, extension)
             val isAudio = mime.startsWith("audio/")
 
-            val resolver = contentResolver
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val collection = if (isAudio) MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
                 else MediaStore.Video.Media.EXTERNAL_CONTENT_URI
@@ -239,14 +353,14 @@ class VideoDownloadService : Service() {
                     put(MediaStore.MediaColumns.RELATIVE_PATH, relative)
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
-                val uri = resolver.insert(collection, values)
+                val uri = contentResolver.insert(collection, values)
                     ?: error("Android could not create the file.")
                 outputUri = uri
-                resolver.openOutputStream(uri, "w").use { output ->
+                contentResolver.openOutputStream(uri, "w").use { output ->
                     requireNotNull(output) { "Could not open the destination." }
                     finalFile.inputStream().use { input -> input.copyTo(output) }
                 }
-                resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+                contentResolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
             } else {
                 val dirName = if (isAudio) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_MOVIES
                 val dir = getExternalFilesDir(dirName) ?: filesDir
@@ -262,25 +376,42 @@ class VideoDownloadService : Service() {
                     progress = 1f,
                     stage = "Saved to $where",
                     savedName = name,
-                    savedUri = outputUri?.toString() ?: legacyFile?.absolutePath
+                    savedUri = outputUri?.toString() ?: legacyFile?.absolutePath,
+                    workDir = null,
+                    selection = null
                 )
             }
             notify(buildDone(task.title, name, isAudio))
-        } catch (e: Exception) {
+        } catch (paused: DownloadPaused) {
+            // Keep the half-finished file so resuming continues instead of restarting.
+            keepWorkDir = true
+            VideoDownloadStore.update(task.id) {
+                it.copy(
+                    status = VideoDownloadStatus.PAUSED,
+                    stage = "Paused · tap to resume",
+                    workDir = workDir.absolutePath,
+                    selection = selection
+                )
+            }
+            notify(buildPaused(task.title))
+        } catch (t: Throwable) {
             outputUri?.let { runCatching { contentResolver.delete(it, null, null) } }
             legacyFile?.let { runCatching { it.delete() } }
-            val wasCancelled = cancelled
+            val wasCancelled = cancelled || discardWorkDir
+            CrashLog.record(this, "Download failed: ${task.title}", t)
             VideoDownloadStore.update(task.id) {
                 it.copy(
                     status = VideoDownloadStatus.FAILED,
-                    message = if (wasCancelled) "Cancelled" else (e.message ?: "Download failed.")
+                    message = if (wasCancelled) "Cancelled" else (t.message ?: "Download failed.")
                 )
             }
-            notify(buildFailed(task.title, if (wasCancelled) "Cancelled" else e.message, selection.isAudio))
+            notify(buildFailed(task.title, if (wasCancelled) "Cancelled" else t.message, selection.isAudio))
         } finally {
-            workDir.deleteRecursively()
+            if (!keepWorkDir) runCatching { workDir.deleteRecursively() }
             currentTask = null
             cancelled = false
+            pauseRequested = false
+            discardWorkDir = false
         }
     }
 
@@ -294,6 +425,7 @@ class VideoDownloadService : Service() {
         val audioUrl = selection.audioUrl
         if (audioUrl.isNullOrBlank()) return videoFile
 
+        checkPause()
         val audioFile = File(workDir, "audio.m4a")
         downloadToFile(audioUrl, audioFile, task, selection, 0.70f, 0.88f, "Downloading audio")
         return mux(videoFile, audioFile, workDir, ext, task, selection)
@@ -311,6 +443,7 @@ class VideoDownloadService : Service() {
         downloadToFile(audioUrl, source, task, selection, 0f, 0.82f, "Downloading audio")
 
         if (selection.outputFormat != "mp3") return source
+        checkPause()
         return transcodeToMp3(source, workDir, selection.mp3BitrateKbps ?: 320, task, selection)
     }
 
@@ -352,13 +485,21 @@ class VideoDownloadService : Service() {
         YtDlpEngine.prepare(this)
         YtDlpEngine.cleanup(this, task.id)
 
-        val executor = Executors.newSingleThreadExecutor()
+        val factory = ThreadFactory { runnable -> Thread(runnable, "off-ytdlp-${task.id.take(8)}") }
+        val executor = Executors.newSingleThreadExecutor(factory)
+        // The body is wrapped so nothing can escape on the worker thread: an uncaught
+        // throw there would take the whole app down instead of failing one download.
         val future = executor.submit(
-            Callable { YtDlpEngine.startDownload(this, pageUrl, selector, workDir, task.id) }
+            Callable {
+                runCatching {
+                    YtDlpEngine.startDownload(this, pageUrl, selector, workDir, task.id)
+                }.onFailure { CrashLog.record(this, "yt-dlp download failed", it) }.getOrDefault(false)
+            }
         )
         try {
             while (!future.isDone) {
-                if (cancelled) YtDlpEngine.cancel(this, task.id)
+                if (cancelled || discardWorkDir) YtDlpEngine.cancel(this, task.id)
+                if (pauseRequested) YtDlpEngine.cancel(this, task.id)
                 YtDlpEngine.progress(this, task.id)?.let { p ->
                     val stage = when (p.status) {
                         "finished" -> "Finishing"
@@ -379,10 +520,11 @@ class VideoDownloadService : Service() {
                 Thread.sleep(400)
             }
             val ok = runCatching { future.get() }.getOrDefault(false)
-            if (!ok) error(if (cancelled) "Download cancelled" else "The download did not complete.")
+            if (pauseRequested) throw DownloadPaused()
+            if (!ok) error(if (cancelled || discardWorkDir) "Cancelled" else "The download did not complete.")
         } finally {
-            executor.shutdownNow()
-            YtDlpEngine.cleanup(this, task.id)
+            runCatching { executor.shutdownNow() }
+            runCatching { YtDlpEngine.cleanup(this, task.id) }
         }
 
         // yt-dlp names its own files, and a merged result is the largest file that
@@ -393,9 +535,14 @@ class VideoDownloadService : Service() {
             ?: error("The download finished but produced no file.")
 
         if (selection.outputFormat == "mp3") {
+            checkPause()
             return transcodeToMp3(produced, workDir, selection.mp3BitrateKbps ?: 320, task, selection)
         }
         return produced
+    }
+
+    private fun checkPause() {
+        if (pauseRequested) throw DownloadPaused()
     }
 
     private fun downloadToFile(
@@ -407,20 +554,29 @@ class VideoDownloadService : Service() {
         to: Float,
         stage: String
     ) {
+        // Resuming: ask the server for the rest of the file instead of starting over.
+        val existing = if (target.exists()) target.length() else 0L
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15000
             readTimeout = 30000
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "Off-Android/3.6.0")
+            setRequestProperty("User-Agent", "Off-Android/4.1.0")
+            if (existing > 0L) setRequestProperty("Range", "bytes=$existing-")
         }
         try {
             connection.connect()
             val code = connection.responseCode
             if (code !in 200..299) error("Server returned HTTP $code")
-            val total = connection.contentLengthLong
+
+            val append = existing > 0L && code == HttpURLConnection.HTTP_PARTIAL
+            if (existing > 0L && !append) runCatching { target.delete() }
+            val already = if (append) existing else 0L
+            val length = connection.contentLengthLong
+            val total = if (append && length > 0) existing + length else length
+
             connection.inputStream.use { input ->
-                FileOutputStream(target).use { output ->
-                    copyWithProgress(input, output, total, task, selection, from, to, stage)
+                FileOutputStream(target, append).use { output ->
+                    copyWithProgress(input, output, total, already, task, selection, from, to, stage)
                 }
             }
         } finally {
@@ -432,6 +588,7 @@ class VideoDownloadService : Service() {
         input: InputStream,
         output: OutputStream,
         total: Long,
+        alreadyDone: Long,
         task: VideoDownloadTask,
         selection: DownloadSelection,
         from: Float,
@@ -440,10 +597,11 @@ class VideoDownloadService : Service() {
     ) {
         val buffer = ByteArray(128 * 1024)
         var read = input.read(buffer)
-        var done = 0L
+        var done = alreadyDone
         var lastStep = -1
         while (read >= 0) {
-            if (cancelled) error("Download cancelled")
+            if (cancelled || discardWorkDir) error("Cancelled")
+            if (pauseRequested) throw DownloadPaused()
             output.write(buffer, 0, read)
             done += read
             if (total > 0) {
@@ -504,7 +662,7 @@ class VideoDownloadService : Service() {
 
     private fun updateProgress(task: VideoDownloadTask, selection: DownloadSelection, progress: Float?, stage: String) {
         VideoDownloadStore.update(task.id) { it.copy(progress = progress, stage = stage) }
-        notify(buildNotification(task.copy(progress = progress, stage = stage), selection))
+        notify(buildNotification(task.copy(progress = progress, stage = stage), selection, false))
     }
 
     /* ------------------------------- notifications ------------------------------ */
@@ -524,7 +682,7 @@ class VideoDownloadService : Service() {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
-    private fun buildNotification(task: VideoDownloadTask, selection: DownloadSelection): Notification {
+    private fun buildNotification(task: VideoDownloadTask, selection: DownloadSelection, resume: Boolean): Notification {
         val percent = ((task.progress ?: 0f) * 100).toInt().coerceIn(0, 100)
         val cancel = NotificationCompat.Action.Builder(
             android.R.drawable.ic_menu_close_clear_cancel, "Cancel",
@@ -537,7 +695,7 @@ class VideoDownloadService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(task.title)
-            .setContentText(task.stage ?: "Preparing…")
+            .setContentText(task.stage ?: if (resume) "Resuming…" else "Preparing…")
             .setSubText(if (selection.isAudio) "Off · audio" else "Off · video")
             .setProgress(100, percent, task.progress == null)
             .setOngoing(true)
@@ -553,6 +711,16 @@ class VideoDownloadService : Service() {
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Saved: $title")
             .setContentText("${if (isAudio) "Audio" else "Video"} complete · $name")
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .setContentIntent(contentIntent())
+            .build()
+
+    private fun buildPaused(title: String): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_media_pause)
+            .setContentTitle("Paused: $title")
+            .setContentText("Tap resume in Off to continue")
             .setOngoing(false)
             .setAutoCancel(true)
             .setContentIntent(contentIntent())
@@ -580,13 +748,23 @@ class VideoDownloadService : Service() {
         runCatching { NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, notification) }
     }
 
+    /**
+     * Entering the foreground is what keeps the system from killing us, so a failure
+     * here must not be swallowed. If the typed call is refused, retry without a type;
+     * if that also fails, record it and give up cleanly.
+     */
     private fun startForegroundCompat(notification: Notification) {
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val typed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         } else {
             0
         }
-        runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type) }
+        val first = runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, typed) }
+        if (first.isSuccess) return
+        val second = runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, 0) }
+        if (second.isSuccess) return
+        CrashLog.record(this, "Could not enter the foreground for a download", first.exceptionOrNull())
+        runCatching { stopSelf() }
     }
 
     private fun stopForegroundCompat() {
@@ -607,10 +785,5 @@ class VideoDownloadService : Service() {
         bytes >= 1_000_000 -> "%.1f MB".format(bytes / 1_000_000.0)
         bytes >= 1_000 -> "%.0f KB".format(bytes / 1_000.0)
         else -> "$bytes B"
-    }
-
-    override fun onDestroy() {
-        scope.cancel()
-        super.onDestroy()
     }
 }

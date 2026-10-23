@@ -72,10 +72,14 @@ data class VideoDownloadTask(
     val savedName: String? = null,
     val savedUri: String? = null,
     val message: String? = null,
+    /** Where the half-finished download lives, so a paused one can pick up again. */
+    val workDir: String? = null,
+    /** Everything needed to restart the download after a pause. */
+    val selection: DownloadSelection? = null,
     val createdAt: Long = System.currentTimeMillis()
 )
 
-enum class VideoDownloadStatus { QUEUED, RUNNING, COMPLETED, FAILED }
+enum class VideoDownloadStatus { QUEUED, RUNNING, PAUSED, COMPLETED, FAILED }
 
 /**
  * Turns a pasted link (or a bare id) into a YouTube video id.

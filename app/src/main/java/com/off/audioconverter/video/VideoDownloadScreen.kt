@@ -8,6 +8,20 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.animateContentSize
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.key
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -214,8 +228,17 @@ fun VideoDownloadScreen(
             VideoInfoSkeleton()
         }
 
-        info?.let { video ->
-            Card(Modifier.fillMaxWidth().graphicsLayer { alpha = infoAlpha }) {
+        AnimatedContent(
+            targetState = info,
+            transitionSpec = {
+                (fadeIn(tween(280)) + expandVertically(tween(380), expandFrom = Alignment.Top)) togetherWith
+                    (fadeOut(tween(160)) + shrinkVertically(tween(260), shrinkTowards = Alignment.Top))
+            },
+            label = "video-card"
+        ) { shown ->
+            if (shown == null) return@AnimatedContent
+            val video = shown
+            Card(Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
                     // 16:9 thumbnail, edge to edge inside the card.
@@ -374,7 +397,7 @@ fun VideoDownloadScreen(
                         onClick = {
                             val chosen = selection ?: return@Button
                             VideoDownloadService.enqueue(context, video, chosen, UUID.randomUUID().toString())
-                            notice = "Downloading “${video.title}” — watch the notification for progress."
+                            notice = "Downloading “${video.title}”. Tap its thumbnail to pause, or long-press for more."
                         },
                         enabled = selection != null,
                         modifier = Modifier
@@ -416,57 +439,38 @@ fun VideoDownloadScreen(
                 OutlinedButton(onClick = { VideoDownloadStore.clearFinished() }) { Text("Clear finished") }
             }
             downloads.forEach { task ->
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.tertiaryContainer,
-                                modifier = Modifier.size(44.dp)
-                            ) {
-                                Icon(
-                                    if (task.label.contains("MP3", ignoreCase = true) ||
-                                        task.label.contains("M4A", ignoreCase = true)
-                                    ) Icons.Default.MusicNote else Icons.Default.Movie,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    modifier = Modifier.padding(10.dp)
-                                )
-                            }
-                            Spacer(Modifier.width(10.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    task.title,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    task.stage ?: task.message ?: task.label,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            if (VideoDownloadStore.isActive(task.status)) {
-                                IconButton(onClick = { VideoDownloadService.cancel(context) }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Cancel download")
+                key(task.id) {
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = fadeIn(tween(260)) + expandVertically(tween(340)),
+                        label = "download-item"
+                    ) {
+                        DownloadRow(
+                            task = task,
+                            onToggle = {
+                                if (task.status == VideoDownloadStatus.PAUSED) {
+                                    VideoDownloadService.resume(context, task.id)
+                                } else {
+                                    VideoDownloadService.pause(context, task.id)
+                                }
+                            },
+                            onDelete = { VideoDownloadService.delete(context, task.id) },
+                            onOpen = {
+                                val saved = task.savedUri
+                                val isAudio = task.label.contains("MP3", true) ||
+                                    task.label.contains("M4A", true)
+                                if (saved != null) {
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(Uri.parse(saved), if (isAudio) "audio/*" else "video/*")
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    runCatching { context.startActivity(intent) }
+                                        .onFailure { notice = "No app on this phone can open that file." }
+                                } else {
+                                    notice = "That file has not been saved yet."
                                 }
                             }
-                        }
-                        if (VideoDownloadStore.isActive(task.status)) {
-                            Spacer(Modifier.height(8.dp))
-                            val progress = task.progress
-                            if (progress != null) {
-                                LinearProgressIndicator(
-                                    progress = { progress },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            } else {
-                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                            }
-                        }
+                        )
                     }
                 }
             }
@@ -548,6 +552,153 @@ private fun VideoInfoSkeleton() {
                 }
             }
             Spacer(Modifier.height(14.dp))
+        }
+    }
+}
+
+/**
+ * One download. The thumbnail doubles as the pause/resume control while the
+ * download is running, and a long press opens the same actions as a menu.
+ */
+@Composable
+private fun DownloadRow(
+    task: VideoDownloadTask,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit,
+    onOpen: () -> Unit
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val active = VideoDownloadStore.isActive(task.status)
+    val paused = task.status == VideoDownloadStatus.PAUSED
+    val completed = task.status == VideoDownloadStatus.COMPLETED
+    val failed = task.status == VideoDownloadStatus.FAILED
+    val isAudio = task.label.contains("MP3", ignoreCase = true) ||
+        task.label.contains("M4A", ignoreCase = true)
+    val fallbackIcon = if (isAudio) Icons.Default.MusicNote else Icons.Default.Movie
+
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+            .pointerInput(task.id) {
+                detectTapGestures(onLongPress = { menuOpen = true })
+            }
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(58.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .pointerInput(task.id, active, paused, completed) {
+                            detectTapGestures(
+                                onTap = {
+                                    when {
+                                        active -> onToggle()
+                                        completed -> onOpen()
+                                        else -> Unit
+                                    }
+                                },
+                                onLongPress = { menuOpen = true }
+                            )
+                        }
+                ) {
+                    SkeletonImage(
+                        model = task.thumbnailUrl,
+                        contentDescription = task.title,
+                        shape = RoundedCornerShape(13.dp),
+                        fallback = fallbackIcon,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    if (active) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.45f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                if (paused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                contentDescription = if (paused) "Resume download" else "Pause download",
+                                tint = Color.White,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        task.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        task.stage ?: task.message ?: task.label,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                when {
+                    completed -> Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = "Saved",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    failed -> Icon(
+                        Icons.Default.ErrorOutline,
+                        contentDescription = "Failed",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Download options")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        if (active) {
+                            DropdownMenuItem(
+                                text = { Text(if (paused) "Resume" else "Pause") },
+                                leadingIcon = {
+                                    Icon(if (paused) Icons.Default.PlayArrow else Icons.Default.Pause, null)
+                                },
+                                onClick = { menuOpen = false; onToggle() }
+                            )
+                        }
+                        if (completed) {
+                            DropdownMenuItem(
+                                text = { Text("Open") },
+                                leadingIcon = { Icon(Icons.Default.PlayArrow, null) },
+                                onClick = { menuOpen = false; onOpen() }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Delete") },
+                            leadingIcon = { Icon(Icons.Default.DeleteOutline, null) },
+                            onClick = { menuOpen = false; onDelete() }
+                        )
+                    }
+                }
+            }
+
+            if (active) {
+                Spacer(Modifier.height(10.dp))
+                val progress = task.progress
+                if (progress != null && !paused) {
+                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                } else {
+                    LinearProgressIndicator(
+                        progress = { if (paused) (progress ?: 0f) else 0f },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
         }
     }
 }

@@ -111,6 +111,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
+import com.off.audioconverter.ui.CrashLog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -240,6 +242,8 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
         super.onCreate(savedInstanceState)
+        // Keep the last failure on the device; Off sends nothing anywhere.
+        CrashLog.install(applicationContext)
         sharedLink.value = linkFrom(intent)
         addOnNewIntentListener { sharedLink.value = linkFrom(it) }
         setContent { OffTheme { OffApp(initialLink = sharedLink.value) } }
@@ -1480,6 +1484,36 @@ private fun DownloadRow(
 
 @Composable
 private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean, onReducedMotion: (Boolean) -> Unit, onBack: () -> Unit) {
+    val context = LocalContext.current
+    var showLog by remember { mutableStateOf(false) }
+    var logText by remember { mutableStateOf("") }
+
+    if (showLog) {
+        AlertDialog(
+            onDismissRequest = { showLog = false },
+            title = { Text("Last error log") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(logText, style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLog = false }) { Text("Close") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        val share = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, logText)
+                        }
+                        runCatching { context.startActivity(Intent.createChooser(share, "Send the error log")) }
+                    }
+                ) { Text("Share") }
+            }
+        )
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -1507,9 +1541,26 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
             }
         }
         Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Diagnostics", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Off keeps the last error on this phone and sends it nowhere. If a download or a screen misbehaves, the report is here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(
+                    onClick = {
+                        logText = CrashLog.read(context) ?: "Nothing has gone wrong so far."
+                        showLog = true
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Last error log") }
+            }
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 4.0.3", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 4.1.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

@@ -229,3 +229,23 @@ catch-all for every site they cannot read.
 - Note on the grey circle with the ring that shows up at the touch point: that is Android's **"Show
   taps"** developer option drawing over the app, not something Off renders — it is drawn outside the
   chip's clip, which an in-app ripple could never be. Turn it off in Settings → Developer options.
+
+## v4.1.0 — downloads that survive, and pause/resume
+- **The crash.** Tapping Download on a yt-dlp link killed the app process. The yt-dlp job runs on a
+  worker thread, and an exception escaping that thread takes the whole process with it — it is not
+  catchable from the code that started it. That body is now wrapped, `YtDlpEngine` never throws from
+  any entry point, `runDownload` catches `Throwable` rather than `Exception`, `onStartCommand` is
+  guarded, and failing to enter the foreground is reported and handled instead of swallowed (that
+  failure is exactly what makes Android kill an app a few seconds after a download starts).
+- **An error log, on the device.** `CrashLog` records the last failure — uncaught ones and handled
+  ones alike — to a file in the app's private storage. Nothing is sent anywhere. Settings →
+  Diagnostics → **Last error log** shows it, with a Share button. If anything still goes wrong, that
+  text is what I need.
+- **Pause and resume.** Tap a downloading item's thumbnail to pause it, tap again to resume. Long
+  press any item for Pause/Resume, Open (when finished) and Delete. Pausing keeps the half-finished
+  file, and resuming continues from those bytes — HTTP downloads send a `Range` request and yt-dlp
+  picks up its own `.part` files.
+- **The list moves instead of jumping.** The fetched video card now expands into place
+  (`AnimatedContent` with `expandVertically`), so the download list below it slides down smoothly,
+  and each new download fades and expands in.
+- Video downloads live in the Video section only; the Library is untouched, as before.

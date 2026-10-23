@@ -3,6 +3,7 @@ package com.off.audioconverter.video
 import android.content.Context
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
+import com.off.audioconverter.ui.CrashLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -23,14 +24,20 @@ object YtDlpEngine {
     @Volatile private var ffmpegReady = false
     @Volatile private var engineVersion: String? = null
 
-    private fun ensureStarted(context: Context) {
-        if (started) return
+    /** Returns false when the interpreter could not be started. Never throws. */
+    private fun ensureStarted(context: Context): Boolean {
+        if (started) return true
         synchronized(this) {
-            if (!started) {
+            if (started) return true
+            return try {
                 if (!Python.isStarted()) {
                     Python.start(AndroidPlatform(context.applicationContext))
                 }
                 started = true
+                true
+            } catch (t: Throwable) {
+                CrashLog.record(context, "Could not start the Python engine", t)
+                false
             }
         }
     }
@@ -44,7 +51,7 @@ object YtDlpEngine {
      */
     fun prepare(context: Context): Boolean {
         if (ffmpegReady) return true
-        ensureStarted(context)
+        if (!ensureStarted(context)) return false
         return runCatching {
             val dir = File(context.filesDir, "ffmpeg").apply { mkdirs() }
             bridge(context).callAttr(
@@ -59,7 +66,7 @@ object YtDlpEngine {
 
     fun version(context: Context): String? {
         engineVersion?.let { return it }
-        ensureStarted(context)
+        if (!ensureStarted(context)) return null
         return runCatching {
             bridge(context).callAttr("version").toString().also { engineVersion = it }
         }.getOrNull()
@@ -67,7 +74,9 @@ object YtDlpEngine {
 
     /** Reads metadata for a link. Throws with a readable message if it cannot. */
     fun extractInfo(context: Context, url: String): JSONObject {
-        ensureStarted(context)
+        if (!ensureStarted(context)) {
+            throw IllegalStateException("The on-device engine could not start.")
+        }
         val raw = runCatching {
             bridge(context).callAttr("extract_info", url).toString()
         }.getOrElse { throw IllegalStateException("The on-device engine could not start.") }
@@ -84,8 +93,8 @@ object YtDlpEngine {
 
     /** Blocks until the download finishes. Poll [progress] from another thread. */
     fun startDownload(context: Context, url: String, selector: String, outputDir: File, jobId: String): Boolean {
-        ensureStarted(context)
-        outputDir.mkdirs()
+        if (!ensureStarted(context)) return false
+        runCatching { outputDir.mkdirs() }
         return runCatching {
             val raw = bridge(context)
                 .callAttr("start_download", url, selector, outputDir.absolutePath, jobId)
@@ -95,10 +104,12 @@ object YtDlpEngine {
     }
 
     fun cancel(context: Context, jobId: String) {
+        if (!started) return
         runCatching { bridge(context).callAttr("cancel_job", jobId) }
     }
 
     fun progress(context: Context, jobId: String): YtDlpProgress? {
+        if (!started) return null
         val raw = runCatching { bridge(context).callAttr("get_progress", jobId).toString() }.getOrNull() ?: return null
         val json = runCatching { JSONObject(raw) }.getOrNull() ?: return null
         return YtDlpProgress(
@@ -111,6 +122,7 @@ object YtDlpEngine {
     }
 
     fun cleanup(context: Context, jobId: String) {
+        if (!started) return
         runCatching { bridge(context).callAttr("cleanup_progress", jobId) }
     }
 
