@@ -249,3 +249,10 @@ catch-all for every site they cannot read.
   (`AnimatedContent` with `expandVertically`), so the download list below it slides down smoothly,
   and each new download fades and expands in.
 - Video downloads live in the Video section only; the Library is untouched, as before.
+
+## v4.1.1 — messages sit above the screen, not behind it
+- The snackbar was the **first** child of the root `Box`, and in a `Box` the later children are
+  drawn on top — so every message rendered *underneath* the page content, the top bar and the
+  navigation bar. A message could be half-hidden behind a card, which is what the screenshot showed.
+- It is now declared **last** inside that `Box`, after the pages, the top bar and the nav bar, so it
+  is drawn above all of them. Position and padding are unchanged.

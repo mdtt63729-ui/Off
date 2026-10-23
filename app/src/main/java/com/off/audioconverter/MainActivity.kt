@@ -525,8 +525,6 @@ private fun OffApp(initialLink: String? = null) {
     }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 200.dp))
-
         AnimatedContent(
             targetState = page,
             transitionSpec = {
@@ -851,6 +849,16 @@ private fun OffApp(initialLink: String? = null) {
                 )
             }
         }
+
+        // Declared last inside the Box. In a Box the later children are drawn on top,
+        // so this is what puts a message above the page content, the top bar and the
+        // navigation bar instead of underneath them.
+        SnackbarHost(
+            snackbar,
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 200.dp)
+        )
     }
 
     FullPlayerOverlay(
@@ -1560,7 +1568,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 4.1.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 4.1.1", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,
