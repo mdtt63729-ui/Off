@@ -69,6 +69,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
+import com.off.audioconverter.ui.components.BouncyChipWide
 import com.off.audioconverter.ui.components.SkeletonBox
 import kotlin.math.abs
 import kotlin.math.sin
@@ -458,23 +459,12 @@ fun OffEditorScreen(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(128, 192, 256, 320).forEach { kbps ->
-                        val selected = bitrate == kbps
-                        Surface(
-                            modifier = Modifier.weight(1f).clickable { onBitrate(kbps) },
-                            color = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceContainerHighest,
-                            contentColor = if (selected) MaterialTheme.colorScheme.onPrimary
-                            else MaterialTheme.colorScheme.onSurface,
-                            shape = RoundedCornerShape(11.dp)
-                        ) {
-                            Text(
-                                "$kbps",
-                                modifier = Modifier.padding(vertical = 9.dp).fillMaxWidth(),
-                                textAlign = TextAlign.Center,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                        BouncyChipWide(
+                            selected = bitrate == kbps,
+                            onClick = { onBitrate(kbps) },
+                            label = "$kbps",
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }
@@ -606,24 +596,12 @@ fun SpeedScreen(
             Label("QUICK PRESETS")
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { value ->
-                    val selected = abs(speed - value) < 0.001f
-                    Surface(
-                        modifier = Modifier.weight(1f).clickable { onSpeed(value) },
-                        color = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.surfaceContainerHigh,
-                        contentColor = if (selected) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurface,
-                        shape = RoundedCornerShape(12.dp),
-                        border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                    ) {
-                        Text(
-                            "${value}×",
-                            modifier = Modifier.padding(vertical = 13.dp).fillMaxWidth(),
-                            textAlign = TextAlign.Center,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
+                    BouncyChipWide(
+                        selected = abs(speed - value) < 0.001f,
+                        onClick = { onSpeed(value) },
+                        label = "${value}×",
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
 
@@ -716,24 +694,12 @@ fun FadeScreen(
             Label("FADE CURVE")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("Linear", "Smooth", "Exponential").forEach { value ->
-                    val selected = curve == value
-                    Surface(
-                        modifier = Modifier.weight(1f).clickable { onCurve(value) },
-                        color = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.surfaceContainerHigh,
-                        contentColor = if (selected) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurface,
-                        shape = RoundedCornerShape(12.dp),
-                        border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                    ) {
-                        Text(
-                            value,
-                            modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(),
-                            textAlign = TextAlign.Center,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                    BouncyChipWide(
+                        selected = curve == value,
+                        onClick = { onCurve(value) },
+                        label = value,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
 

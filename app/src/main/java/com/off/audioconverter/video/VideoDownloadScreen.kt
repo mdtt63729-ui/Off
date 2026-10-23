@@ -59,6 +59,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.off.audioconverter.ui.components.BouncyChip
 import com.off.audioconverter.ui.components.MaterialLoadingIndicator
 import com.off.audioconverter.ui.components.SkeletonBox
 import com.off.audioconverter.ui.components.SkeletonImage
@@ -262,18 +263,18 @@ fun VideoDownloadScreen(
                     ) {
                         Text("Download as", style = MaterialTheme.typography.titleSmall)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(
+                            BouncyChip(
                                 selected = mode == 0,
                                 onClick = { mode = 0 },
-                                label = { Text("Video") },
-                                leadingIcon = { Icon(Icons.Default.Movie, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                label = "Video",
+                                leadingIcon = Icons.Default.Movie
                             )
-                            FilterChip(
+                            BouncyChip(
                                 selected = mode == 1,
                                 onClick = { mode = 1 },
                                 enabled = video.audioOptions.isNotEmpty(),
-                                label = { Text("Audio") },
-                                leadingIcon = { Icon(Icons.Default.MusicNote, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                label = "Audio",
+                                leadingIcon = Icons.Default.MusicNote
                             )
                         }
 
@@ -287,10 +288,10 @@ fun VideoDownloadScreen(
                                 video.qualities.chunked(4).forEach { row ->
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         row.forEach { option ->
-                                            FilterChip(
+                                            BouncyChip(
                                                 selected = quality == option,
                                                 onClick = { quality = option },
-                                                label = { Text(option.label) }
+                                                label = option.label
                                             )
                                         }
                                     }
@@ -310,10 +311,10 @@ fun VideoDownloadScreen(
                         } else {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 video.audioOptions.forEach { option ->
-                                    FilterChip(
+                                    BouncyChip(
                                         selected = audio == option,
                                         onClick = { audio = option },
-                                        label = { Text(option.label) }
+                                        label = option.label
                                     )
                                 }
                             }

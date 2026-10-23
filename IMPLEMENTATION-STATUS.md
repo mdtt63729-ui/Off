@@ -132,3 +132,16 @@
   now two separate gesture detectors, so the drag can no longer swallow the tap.
 - **Page transitions**: the exit is the mirror of the entrance, and the direction follows depth —
   going deeper slides forward, closing a page slides back the other way.
+
+## v3.10.0 — bouncy chips everywhere, seamless nav bar
+- New `ui/components/BouncyChip.kt`: `BouncyChip` and `BouncyChipWide`. Selecting one dips
+  slightly, pops ~7% past its resting size and lets a soft spring settle it back, with the colours
+  cross-fading on their own spring and the icon settling a beat behind. A plain chip's colour change
+  reads as nothing happening; this reads as a switch being thrown.
+- Every selectable chip in the app now uses it: the **Video / Audio** switch and the quality and
+  audio-format chips on the video screen, the source chips in search, the equalizer presets, the
+  library tabs, and the bitrate, fade-curve and speed-preset chips in the editor.
+- **Nav bar**: a single animated value — the fractional position of the selection — now drives the
+  slot widths, the label fades and the indicator together, so nothing can drift a frame apart. The
+  row always fills the bar, so the bar no longer shifts sideways as one slot opens and another
+  closes, and labels fade and slide in behind the arriving pill.

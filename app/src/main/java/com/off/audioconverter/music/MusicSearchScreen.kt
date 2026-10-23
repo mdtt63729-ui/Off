@@ -80,6 +80,7 @@ import com.off.audioconverter.download.DownloadTask
 import com.off.audioconverter.library.LibraryStore
 import com.off.audioconverter.player.AddToPlaylistDialog
 import com.off.audioconverter.player.PlayerController
+import com.off.audioconverter.ui.components.BouncyChip
 import com.off.audioconverter.ui.components.SkeletonBox
 import com.off.audioconverter.ui.components.SkeletonImage
 import com.off.audioconverter.ui.components.SkeletonLine
@@ -187,7 +188,7 @@ fun MusicSearchScreen(modifier: Modifier = Modifier) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MusicSource.entries.forEach { source ->
                 val selected = source in enabledSources
-                FilterChip(
+                BouncyChip(
                     selected = selected,
                     onClick = {
                         val next = if (selected) enabledSources - source else enabledSources + source
@@ -195,10 +196,8 @@ fun MusicSearchScreen(modifier: Modifier = Modifier) {
                         settings.saavnEnabled = MusicSource.SAAVN in enabledSources
                         settings.youtubeEnabled = MusicSource.YOUTUBE in enabledSources
                     },
-                    label = { Text(source.label) },
-                    leadingIcon = if (selected) {
-                        { Icon(Icons.Default.DownloadDone, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                    } else null
+                    label = source.label,
+                    leadingIcon = if (selected) Icons.Default.DownloadDone else null
                 )
             }
         }

@@ -1,20 +1,16 @@
 package com.off.audioconverter.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -40,22 +36,23 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
+import kotlin.math.floor
 
 data class NavItem(val label: String, val icon: ImageVector)
 
 /**
  * A floating, pill-shaped navigation bar.
  *
- * The selected item's pill is a SINGLE box that slides and resizes between items.
- * Drawing one pill per item (as this used to) meant that mid-switch two pills were
- * on screen at once, overlapping, with both labels fading across each other — the
- * garbled "Studio/Search" text you could see while switching.
+ * One animated value — the fractional position of the selection — drives
+ * everything: each slot's width, the label fades and the indicator itself. That is
+ * what makes the shift seamless. Animating the slots and the pill separately (as
+ * this used to) lets them drift a frame apart, and drawing a pill per item put two
+ * of them on screen mid-switch.
  *
- * Each item's width is driven by an animated value that this composable owns, and
- * the pill's offset is the running sum of those same values, so the pill tracks the
- * items exactly instead of chasing a re-layout.
+ * The row always fills the bar, so the bar itself never jumps around while the
+ * selection grows one slot and shrinks another.
  */
 @Composable
 fun FloatingNavBar(
@@ -69,26 +66,29 @@ fun FloatingNavBar(
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
-
-    // Measure each label once so the selected item can reserve exactly the right width.
-    val labelWidths: List<Dp> = items.map { item ->
-        with(density) { measurer.measure(item.label, labelStyle).size.width.toDp() }
-    }
-
-    val widthSpring = spring<Dp>(
-        dampingRatio = Spring.DampingRatioNoBouncy,
-        stiffness = Spring.StiffnessMediumLow
-    )
-
-    // Every item animates between an icon-only slot and an icon + label slot.
-    val itemWidths: List<Dp> = items.indices.map { index ->
-        val target = if (index == selectedIndex) labelWidths[index] + ICON_SLOT + LABEL_GAP else ICON_SLOT
-        animateDpAsState(targetValue = target, animationSpec = widthSpring, label = "nav-width-$index").value
+    val labelWidths = items.map { item ->
+        with(density) { measurer.measure(item.label, labelStyle).size.width.toDp().value }
     }
 
     val safeSelected = selectedIndex.coerceIn(0, items.lastIndex)
-    val pillOffset = itemWidths.take(safeSelected).fold(0.dp) { acc, w -> acc + w }
-    val pillWidth = itemWidths[safeSelected]
+
+    val progress by animateFloatAsState(
+        targetValue = safeSelected.toFloat(),
+        // Enough bounce to feel alive, not so much that the label overshoots its slot.
+        animationSpec = spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow),
+        label = "nav-progress"
+    )
+
+    // How far open each slot is, as a smooth triangle centred on the selection.
+    val expand = items.indices.map { i -> (1f - abs(progress - i)).coerceIn(0f, 1f) }
+    val weights = items.indices.map { i ->
+        ICON_SLOT + (labelWidths[i] + LABEL_GAP) * expand[i]
+    }
+    val totalWeight = weights.sum().takeIf { it > 0f } ?: 1f
+
+    val lower = floor(progress).toInt().coerceIn(0, items.lastIndex)
+    val upper = (lower + 1).coerceAtMost(items.lastIndex)
+    val fraction = (progress - lower).coerceIn(0f, 1f)
 
     Surface(
         shape = RoundedCornerShape(30.dp),
@@ -97,59 +97,63 @@ fun FloatingNavBar(
         shadowElevation = 14.dp,
         modifier = modifier.fillMaxWidth()
     ) {
-        Box(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            contentAlignment = Alignment.Center
+        BoxWithConstraints(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            contentAlignment = Alignment.CenterStart
         ) {
-            Box {
-                // The one and only indicator.
-                Box(
-                    modifier = Modifier
-                        .offset(x = pillOffset)
-                        .width(pillWidth)
-                        .height(PILL_HEIGHT)
-                        .clip(RoundedCornerShape(PILL_HEIGHT / 2))
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                )
+            val slotWidths = weights.map { maxWidth * (it / totalWeight) }
+            val before = slotWidths.take(lower).fold(0.dp) { acc, w -> acc + w }
+            val pillOffset = before + slotWidths[lower] * fraction
+            val pillWidth = slotWidths[lower] + (slotWidths[upper] - slotWidths[lower]) * fraction
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Start
-                ) {
-                    items.forEachIndexed { index, item ->
-                        val selected = index == safeSelected
-                        val interaction = remember { MutableInteractionSource() }
-                        val pressed by interaction.collectIsPressedAsState()
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = pillOffset)
+                    .width(pillWidth)
+                    .height(PILL_HEIGHT)
+                    .clip(RoundedCornerShape(PILL_HEIGHT / 2))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+            )
 
-                        val pressScale by animateFloatAsState(
-                            targetValue = if (pressed) 0.93f else 1f,
-                            animationSpec = spring(stiffness = Spring.StiffnessHigh),
-                            label = "nav-press"
-                        )
-                        val content by animateColorAsState(
-                            targetValue = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                            label = "nav-content"
-                        )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                items.forEachIndexed { index, item ->
+                    val interaction = remember { MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
+                    val selected = index == safeSelected
+                    val open = expand[index]
 
-                        Row(
-                            modifier = Modifier
-                                .width(itemWidths[index])
-                                .height(PILL_HEIGHT)
-                                // Clip so the label cannot spill out while the slot shrinks.
-                                .clipToBounds()
-                                .graphicsLayer {
-                                    scaleX = pressScale
-                                    scaleY = pressScale
-                                }
-                                .selectable(
-                                    selected = selected,
-                                    interactionSource = interaction,
-                                    indication = null
-                                ) { onSelect(index) },
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                    val pressScale by animateFloatAsState(
+                        targetValue = if (pressed) 0.92f else 1f,
+                        animationSpec = spring(dampingRatio = 0.40f, stiffness = Spring.StiffnessHigh),
+                        label = "nav-press-$index"
+                    )
+                    val content by animateColorAsState(
+                        targetValue = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
+                        label = "nav-content-$index"
+                    )
+
+                    Row(
+                        Modifier
+                            .weight(weights[index])
+                            .height(PILL_HEIGHT)
+                            .clipToBounds()
+                            .graphicsLayer {
+                                scaleX = pressScale
+                                scaleY = pressScale
+                            }
+                            .selectable(
+                                selected = selected,
+                                interactionSource = interaction,
+                                indication = null
+                            ) { onSelect(index) },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier.width(ICON_SLOT.dp).fillMaxHeight(),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 item.icon,
@@ -157,21 +161,19 @@ fun FloatingNavBar(
                                 tint = content,
                                 modifier = Modifier.size(22.dp)
                             )
-                            AnimatedVisibility(
-                                visible = selected,
-                                enter = fadeIn(tween(160)),
-                                exit = fadeOut(tween(90))
-                            ) {
-                                Text(
-                                    item.label,
-                                    color = content,
-                                    style = labelStyle,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Clip,
-                                    modifier = Modifier.padding(start = LABEL_GAP)
-                                )
-                            }
                         }
+                        Text(
+                            item.label,
+                            color = content,
+                            style = labelStyle,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
+                            modifier = Modifier.graphicsLayer {
+                                // Fades and slides in behind the arriving pill.
+                                alpha = ((open - 0.3f) / 0.7f).coerceIn(0f, 1f)
+                                translationX = (1f - open) * 30f
+                            }
+                        )
                     }
                 }
             }
@@ -179,6 +181,6 @@ fun FloatingNavBar(
     }
 }
 
-private val ICON_SLOT = 56.dp
-private val LABEL_GAP = 8.dp
+private const val ICON_SLOT = 56f
+private const val LABEL_GAP = 8f
 private val PILL_HEIGHT = 44.dp

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import com.off.audioconverter.ui.components.BouncyChip
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -84,10 +85,10 @@ fun EqualizerPane(modifier: Modifier = Modifier) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 presets.take(4).forEachIndexed { index, name ->
-                    FilterChip(
+                    BouncyChip(
                         selected = false,
                         onClick = { EqualizerController.usePreset(index.toShort()) },
-                        label = { Text(name, maxLines = 1) }
+                        label = name
                     )
                 }
             }

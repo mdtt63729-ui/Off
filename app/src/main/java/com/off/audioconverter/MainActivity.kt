@@ -164,6 +164,7 @@ import com.off.audioconverter.ui.OffEditorScreen
 import com.off.audioconverter.ui.ResetScreen
 import com.off.audioconverter.ui.SpeedScreen
 import com.off.audioconverter.ui.TrimScreen
+import com.off.audioconverter.ui.components.BouncyChip
 import com.off.audioconverter.ui.components.SkeletonBox
 import com.off.audioconverter.ui.components.SkeletonImage
 import com.off.audioconverter.ui.components.SkeletonLine
@@ -1104,10 +1105,10 @@ private fun LibraryScreen(
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("Favourites", "Playlists", "Files").forEachIndexed { index, label ->
-                FilterChip(
+                BouncyChip(
                     selected = tab == index,
                     onClick = { tab = index; openPlaylistName = null },
-                    label = { Text(label) }
+                    label = label
                 )
             }
         }
@@ -1470,7 +1471,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 3.9.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 3.10.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,
