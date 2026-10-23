@@ -36,6 +36,8 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import java.net.URL
 
 /** Observable registry of video downloads, mirroring the music download store. */
@@ -95,6 +97,11 @@ class VideoDownloadService : Service() {
         private const val EXTRA_FORMAT = "format"
         private const val EXTRA_MP3_BITRATE = "mp3Bitrate"
         private const val EXTRA_LABEL = "label"
+        private const val EXTRA_PAGE_URL = "pageUrl"
+        private const val EXTRA_YTDLP_SELECTOR = "ytDlpSelector"
+
+        /** yt-dlp's intermediate parts, e.g. name.f137.mp4, which are not the result. */
+        private val INTERMEDIATE_PART = Regex("\\.f\\d+\\.")
 
         fun enqueue(context: Context, info: VideoInfo, selection: DownloadSelection, taskId: String) {
             val intent = Intent(context, VideoDownloadService::class.java).apply {
@@ -107,6 +114,8 @@ class VideoDownloadService : Service() {
                 putExtra(EXTRA_FORMAT, selection.outputFormat)
                 putExtra(EXTRA_MP3_BITRATE, selection.mp3BitrateKbps ?: -1)
                 putExtra(EXTRA_LABEL, selection.label)
+                putExtra(EXTRA_PAGE_URL, selection.pageUrl)
+                putExtra(EXTRA_YTDLP_SELECTOR, selection.ytDlpSelector)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -165,7 +174,9 @@ class VideoDownloadService : Service() {
             audioUrl = audioUrl,
             sourceMime = intent.getStringExtra(EXTRA_MIME) ?: "video/mp4",
             outputFormat = format,
-            mp3BitrateKbps = intent.getIntExtra(EXTRA_MP3_BITRATE, -1).takeIf { it > 0 }
+            mp3BitrateKbps = intent.getIntExtra(EXTRA_MP3_BITRATE, -1).takeIf { it > 0 },
+            pageUrl = intent.getStringExtra(EXTRA_PAGE_URL),
+            ytDlpSelector = intent.getStringExtra(EXTRA_YTDLP_SELECTOR)
         )
         VideoDownloadStore.add(task)
         pending.addLast(Pending(task, selection))
@@ -196,10 +207,12 @@ class VideoDownloadService : Service() {
         var outputUri: Uri? = null
         var legacyFile: File? = null
         try {
-            val finalFile: File = if (selection.isAudio) {
-                downloadAudio(workDir, selection, task)
-            } else {
-                downloadVideo(workDir, selection, task)
+            val finalFile: File = when {
+                // yt-dlp fetches the file itself: the streams often need headers or
+                // cookies only the extractor knows about.
+                selection.ytDlpSelector != null -> downloadViaYtDlp(workDir, selection, task)
+                selection.isAudio -> downloadAudio(workDir, selection, task)
+                else -> downloadVideo(workDir, selection, task)
             }
 
             updateProgress(task, selection, 0.97f, "Saving")
@@ -209,6 +222,7 @@ class VideoDownloadService : Service() {
                 "mp3" -> "audio/mpeg"
                 "m4a", "aac" -> "audio/mp4"
                 "webm" -> if (selection.isAudio) "audio/webm" else "video/webm"
+                "mkv" -> "video/x-matroska"
                 else -> if (selection.isAudio) "audio/mp4" else "video/mp4"
             }
             val name = buildFileName(task.title, extension)
@@ -297,10 +311,19 @@ class VideoDownloadService : Service() {
         downloadToFile(audioUrl, source, task, selection, 0f, 0.82f, "Downloading audio")
 
         if (selection.outputFormat != "mp3") return source
+        return transcodeToMp3(source, workDir, selection.mp3BitrateKbps ?: 320, task, selection)
+    }
 
-        updateProgress(task, selection, 0.88f, "Converting to MP3")
-        val bitrate = selection.mp3BitrateKbps ?: 320
-        val mp3 = File(workDir, "audio.mp3")
+    /** Re-encodes a downloaded audio file to MP3 with the bundled FFmpeg. */
+    private fun transcodeToMp3(
+        source: File,
+        workDir: File,
+        bitrate: Int,
+        task: VideoDownloadTask,
+        selection: DownloadSelection
+    ): File {
+        updateProgress(task, selection, 0.90f, "Converting to MP3")
+        val mp3 = File(workDir, "off_converted.mp3")
         val session = FFmpegKit.executeWithArguments(
             arrayOf(
                 "-y", "-i", source.absolutePath,
@@ -312,6 +335,67 @@ class VideoDownloadService : Service() {
             error("Could not convert the audio to MP3. Try the M4A option instead.")
         }
         return mp3
+    }
+
+    /**
+     * Runs yt-dlp on a worker thread and polls its progress file, so the same
+     * notification and the same download list show live progress either way.
+     */
+    private fun downloadViaYtDlp(
+        workDir: File,
+        selection: DownloadSelection,
+        task: VideoDownloadTask
+    ): File {
+        val pageUrl = selection.pageUrl ?: error("The original link is missing.")
+        val selector = selection.ytDlpSelector ?: error("No format was chosen.")
+
+        YtDlpEngine.prepare(this)
+        YtDlpEngine.cleanup(this, task.id)
+
+        val executor = Executors.newSingleThreadExecutor()
+        val future = executor.submit(
+            Callable { YtDlpEngine.startDownload(this, pageUrl, selector, workDir, task.id) }
+        )
+        try {
+            while (!future.isDone) {
+                if (cancelled) YtDlpEngine.cancel(this, task.id)
+                YtDlpEngine.progress(this, task.id)?.let { p ->
+                    val stage = when (p.status) {
+                        "finished" -> "Finishing"
+                        "downloading" -> "Downloading"
+                        "processing" -> "Processing"
+                        "error" -> "Failed"
+                        else -> p.message.ifBlank { "Downloading" }
+                    }
+                    val speed = if (p.speedBytesPerSecond > 0) " · ${formatBytes(p.speedBytesPerSecond)}/s" else ""
+                    val eta = p.etaSeconds?.let { " · ${it}s left" } ?: ""
+                    updateProgress(
+                        task,
+                        selection,
+                        (p.percent / 100f).coerceIn(0f, 1f),
+                        "$stage · ${p.percent.toInt()}%$speed$eta"
+                    )
+                }
+                Thread.sleep(400)
+            }
+            val ok = runCatching { future.get() }.getOrDefault(false)
+            if (!ok) error(if (cancelled) "Download cancelled" else "The download did not complete.")
+        } finally {
+            executor.shutdownNow()
+            YtDlpEngine.cleanup(this, task.id)
+        }
+
+        // yt-dlp names its own files, and a merged result is the largest file that
+        // is not one of the intermediate .fNNN parts.
+        val produced = workDir.listFiles()
+            ?.filter { it.isFile && it.length() > 0L && !INTERMEDIATE_PART.containsMatchIn(it.name) }
+            ?.maxByOrNull { it.length() }
+            ?: error("The download finished but produced no file.")
+
+        if (selection.outputFormat == "mp3") {
+            return transcodeToMp3(produced, workDir, selection.mp3BitrateKbps ?: 320, task, selection)
+        }
+        return produced
     }
 
     private fun downloadToFile(

@@ -6,21 +6,25 @@ data class VideoQuality(
     val height: Int,
     /** True when the stream already carries audio, so no muxing is needed. */
     val muxed: Boolean,
-    val videoUrl: String,
+    /** Null for yt-dlp renditions, which yt-dlp fetches itself. */
+    val videoUrl: String?,
     /** Present only when [muxed] is false — the audio to pair with the video. */
     val audioUrl: String?,
     val mimeType: String,
-    val sizeBytes: Long? = null
+    val sizeBytes: Long? = null,
+    /** Set when this rendition comes from yt-dlp: the format selector to hand it. */
+    val ytDlpSelector: String? = null
 )
 
 /** An audio-only download: the source audio, optionally re-encoded to MP3. */
 data class AudioOption(
     val label: String,
-    val url: String,
+    val url: String?,
     /** "mp3" re-encodes with FFmpeg; "m4a" saves the original audio untouched. */
     val outputFormat: String,
     val mp3BitrateKbps: Int?,
-    val sourceMime: String
+    val sourceMime: String,
+    val ytDlpSelector: String? = null
 )
 
 /** Everything the download screen needs about a pasted link. */
@@ -33,7 +37,7 @@ data class VideoInfo(
     val description: String,
     val qualities: List<VideoQuality>,
     val audioOptions: List<AudioOption>,
-    /** Which backend answered: "NewPipe" or a Piped instance host. */
+    /** Which backend answered: "NewPipe", a Piped host, or "yt-dlp · <extractor>". */
     val source: String
 ) {
     val best: VideoQuality? get() = qualities.firstOrNull()
@@ -47,7 +51,11 @@ data class DownloadSelection(
     val sourceMime: String,
     /** "mp4", "webm", "mp3" or "m4a". */
     val outputFormat: String,
-    val mp3BitrateKbps: Int? = null
+    val mp3BitrateKbps: Int? = null,
+    /** The page the user pasted — yt-dlp downloads from this, not from a stream URL. */
+    val pageUrl: String? = null,
+    /** When set, the download runs through yt-dlp with this format selector. */
+    val ytDlpSelector: String? = null
 ) {
     val isAudio: Boolean get() = outputFormat == "mp3" || outputFormat == "m4a"
 }

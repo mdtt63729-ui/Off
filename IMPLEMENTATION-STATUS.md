@@ -159,3 +159,27 @@ Three separate things made the sliders feel notchy; all three are fixed.
 - The volume control is back in the editor, under the transport.
 - `atempo` is now chained, so the speed slider's full 0.25x-2x range actually works; a single
   `atempo` only covers 0.5x-2x, so 0.25x used to do nothing.
+
+## v4.0.0 — on-device yt-dlp, so links from almost anywhere work
+NewPipe Extractor and the Piped API are still there; yt-dlp is added alongside them as the
+catch-all for every site they cannot read.
+
+- **Engine order.** YouTube (and the sites NewPipe knows natively) still goes through NewPipe
+  first, then Piped, then yt-dlp. Anything else — Instagram, TikTok, Facebook, X, Reddit, Vimeo,
+  Dailymotion, Twitch VOD, SoundCloud and the rest of yt-dlp's list — goes to yt-dlp. Keeping
+  NewPipe first matters: yt-dlp's YouTube extraction needs an external JavaScript runtime, which
+  is the riskiest part of a yt-dlp-only setup, and NewPipe already covers YouTube.
+- **On-device, no backend.** `app/src/main/python/bridge.py` runs yt-dlp through Chaquopy. No
+  Off-owned server and no third-party extraction API; requests go straight to the target site.
+- **Bundled ffmpeg.** `scripts/build-ffmpeg-android.sh` builds a minimal LGPL ffmpeg + ffprobe
+  from pinned source (n7.1.1) for arm64 in CI and ships them as `libffmpeg.so` / `libffprobe.so`,
+  so yt-dlp can merge separate video and audio streams. Legacy jniLibs packaging is what lets the
+  app execute them.
+- **Downloads.** A yt-dlp job runs on a worker thread while the service polls its progress file, so
+  the same notification and download list show live percentage, speed and ETA. MP3 conversion for
+  yt-dlp downloads reuses the bundled ffmpeg-kit.
+- **Share into Off.** `ACTION_SEND` text/plain is accepted: sharing a link from any app opens the
+  downloader and fetches it immediately.
+- **ARM64 only.** Chaquopy builds a Python runtime per ABI and the bundled ffmpeg is arm64, so the
+  app now ships `arm64-v8a` alone.
+- Only download what you own or have permission to save.

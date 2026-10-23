@@ -1,5 +1,6 @@
 package com.off.audioconverter.video
 
+import android.content.Context
 import com.off.audioconverter.music.HttpDownloader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -16,12 +17,17 @@ import org.schabi.newpipe.extractor.stream.StreamInfo
  * any other site NewPipe supports (PeerTube, SoundCloud, Bandcamp, media.ccc.de)
  * the extractor picks the right service by itself.
  *
+ * Anything those two cannot read — Instagram, TikTok, Facebook, X, Reddit,
+ * Vimeo, Dailymotion, Twitch VOD and the rest of the long tail — goes to the
+ * on-device yt-dlp engine. It is the catch-all, and it runs on the phone with no
+ * Off-owned backend.
+ *
  * Muxed (progressive) streams are preferred, because they already contain audio
  * and need no post-processing. Where a height only exists as video-only, the
  * best audio stream is carried alongside it and the two are muxed with FFmpeg
  * after download.
  */
-class VideoRepository {
+class VideoRepository(private val context: Context) {
 
     companion object {
         private const val YOUTUBE_SERVICE_ID = 0
@@ -56,14 +62,27 @@ class VideoRepository {
 
             PipedApi.streams(videoId)?.let { return@withContext it }
 
+            // Last resort for YouTube itself: yt-dlp may have caught up already.
+            runCatching { resolveWithYtDlp(text) }
+                .getOrNull()
+                ?.takeIf { it.qualities.isNotEmpty() }
+                ?.let { return@withContext it }
+
             error("Could not read that video. Check the link, and try again in a moment.")
         }
 
-        // Not a YouTube link — let the extractor choose the service.
+        // NewPipe first for the sites it knows natively.
         val generic = runCatching { resolveWithService(text) }.getOrNull()
         if (generic != null && generic.qualities.isNotEmpty()) return@withContext generic
 
-        error("That link isn't supported. YouTube works, as do the sites NewPipe handles (PeerTube, SoundCloud, Bandcamp).")
+        // Everything else goes through yt-dlp, on-device.
+        resolveWithYtDlp(text)
+    }
+
+    /** The catch-all: yt-dlp reads anything its extractors support. */
+    private fun resolveWithYtDlp(url: String): VideoInfo {
+        val json = YtDlpEngine.extractInfo(context, url)
+        return YtDlpEngine.toVideoInfo(url, json)
     }
 
     private fun resolveYouTube(videoId: String): VideoInfo {

@@ -76,14 +76,15 @@ import java.util.UUID
 @Composable
 fun VideoDownloadScreen(
     contentPadding: PaddingValues,
+    initialLink: String? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val repository = remember { VideoRepository() }
+    val repository = remember { VideoRepository(context) }
     val downloads by VideoDownloadStore.tasks.collectAsState()
 
-    var link by remember { mutableStateOf("") }
+    var link by remember { mutableStateOf(initialLink.orEmpty()) }
     var info by remember { mutableStateOf<VideoInfo?>(null) }
     var mode by remember { mutableIntStateOf(0) }          // 0 = video, 1 = audio
     var quality by remember { mutableStateOf<VideoQuality?>(null) }
@@ -119,6 +120,14 @@ fun VideoDownloadScreen(
         label = "video-info-fade"
     )
 
+    // A link shared into Off is fetched straight away.
+    LaunchedEffect(initialLink) {
+        if (!initialLink.isNullOrBlank()) {
+            link = initialLink
+            fetch()
+        }
+    }
+
     val selection: DownloadSelection? = if (mode == 0) {
         quality?.let {
             DownloadSelection(
@@ -126,7 +135,9 @@ fun VideoDownloadScreen(
                 videoUrl = it.videoUrl,
                 audioUrl = it.audioUrl,
                 sourceMime = it.mimeType,
-                outputFormat = if (it.mimeType.contains("webm")) "webm" else "mp4"
+                outputFormat = if (it.mimeType.contains("webm")) "webm" else "mp4",
+                pageUrl = link.trim(),
+                ytDlpSelector = it.ytDlpSelector
             )
         }
     } else {
@@ -137,7 +148,9 @@ fun VideoDownloadScreen(
                 audioUrl = it.url,
                 sourceMime = it.sourceMime,
                 outputFormat = it.outputFormat,
-                mp3BitrateKbps = it.mp3BitrateKbps
+                mp3BitrateKbps = it.mp3BitrateKbps,
+                pageUrl = link.trim(),
+                ytDlpSelector = it.ytDlpSelector
             )
         }
     }
@@ -453,9 +466,9 @@ fun VideoDownloadScreen(
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(28.dp)
                     )
-                    Text("Paste any supported link", fontWeight = FontWeight.SemiBold)
+                    Text("Paste a link from almost anywhere", fontWeight = FontWeight.SemiBold)
                     Text(
-                        "YouTube works in every shape — watch, youtu.be, shorts, live and embed — and the sites NewPipe handles (PeerTube, SoundCloud, Bandcamp) work too. Download it as video, or as MP3 / M4A audio.",
+                        "YouTube in every shape (watch, youtu.be, shorts, live, embed) goes through NewPipe. Instagram, TikTok, Facebook, X, Reddit, Vimeo, Dailymotion, Twitch VOD, SoundCloud and the rest of yt-dlp's list are read by the on-device yt-dlp engine. Download it as video, or as MP3 / M4A audio.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

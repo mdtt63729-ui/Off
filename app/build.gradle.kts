@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    // yt-dlp runs on-device through Chaquopy, so no Off-owned backend is needed.
+    id("com.chaquo.python")
 }
 
 android {
@@ -12,10 +14,13 @@ android {
         applicationId = "com.off.audioconverter"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "3.11.0"
+        versionCode = 17
+        versionName = "4.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+        // Chaquopy builds a Python runtime per ABI, and the bundled ffmpeg is
+        // arm64-only, so the app ships arm64-v8a alone to keep the APK sane.
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     buildTypes {
@@ -44,10 +49,30 @@ android {
         compose = true
     }
     packaging {
+        // The bundled ffmpeg/ffprobe are shipped as libffmpeg.so / libffprobe.so.
+        // Legacy packaging extracts native libraries into the app's library
+        // directory, which is the only place an app may execute its own binaries.
+        jniLibs {
+            useLegacyPackaging = true
+        }
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         resources.excludes += "/META-INF/DEPENDENCIES"
         resources.excludes += "/META-INF/LICENSE*"
         resources.excludes += "/META-INF/NOTICE*"
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.11"
+        // CI passes an absolute interpreter path in BUILD_PYTHON; locally it
+        // falls back to the python3.11 command.
+        buildPython(System.getenv("BUILD_PYTHON") ?: "python3.11")
+        pip {
+            // yt-dlp is the extractor for every site NewPipe Extractor does not
+            // cover natively. Pin it so a rebuild is reproducible.
+            install("yt-dlp==2026.10.21")
+        }
     }
 }
 

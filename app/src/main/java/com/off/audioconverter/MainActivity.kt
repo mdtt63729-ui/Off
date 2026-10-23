@@ -213,26 +213,46 @@ private fun pageRank(page: OffPage): Int = when (page) {
 }
 
 class MainActivity : ComponentActivity() {
+
+    /** A link shared into Off from another app, if there is one. */
+    private val sharedLink = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
         super.onCreate(savedInstanceState)
-        setContent { OffTheme { OffApp() } }
+        sharedLink.value = linkFrom(intent)
+        addOnNewIntentListener { sharedLink.value = linkFrom(it) }
+        setContent { OffTheme { OffApp(initialLink = sharedLink.value) } }
+    }
+
+    /** Pulls the first http(s) URL out of a shared message. */
+    private fun linkFrom(intent: Intent?): String? {
+        if (intent?.action != Intent.ACTION_SEND) return null
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+        return Regex("https?://\\S+").find(text)?.value
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OffApp() {
+private fun OffApp(initialLink: String? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val engine = remember { AudioConversionEngine(context.contentResolver, context.cacheDir) }
     val settings = remember { SettingsStore(context) }
 
-    var page by remember { mutableStateOf(OffPage.HOME) }
+    var page by remember {
+        mutableStateOf(if (initialLink.isNullOrBlank()) OffPage.HOME else OffPage.VIDEO)
+    }
+
+    // A link that arrives later (share while Off is already open) opens the downloader.
+    LaunchedEffect(initialLink) {
+        if (!initialLink.isNullOrBlank()) page = OffPage.VIDEO
+    }
     var showPlayer by remember { mutableStateOf(false) }
 
     // Conversion state — restored from the settings store so it survives a restart.
@@ -558,7 +578,7 @@ private fun OffApp() {
                 OffPage.SEARCH -> MusicSearchScreen(
                     modifier = Modifier.padding(contentPadding)
                 )
-                OffPage.VIDEO -> VideoDownloadScreen(contentPadding = contentPadding)
+                OffPage.VIDEO -> VideoDownloadScreen(contentPadding = contentPadding, initialLink = initialLink)
                 OffPage.EDITOR -> OffEditorScreen(
                     contentPadding = contentPadding,
                     artwork = artwork,
@@ -1466,7 +1486,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 3.11.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 4.0.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

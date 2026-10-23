@@ -12,6 +12,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
+      NDK_VERSION: r27c
+      FFMPEG_VERSION: n7.1.1
       # Set these repository secrets to have CI produce a signed APK.
       #   KEYSTORE_BASE64   base64 -w0 off-release.jks
       #   KEYSTORE_PASSWORD store password
@@ -32,6 +34,49 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Set up Python for Chaquopy
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Select the build Python interpreter
+        run: |
+          PY="$(command -v python3.11 || command -v python3)"
+          "$PY" --version
+          echo "BUILD_PYTHON=$PY" >> "$GITHUB_ENV"
+
+      - name: Cache the NDK and the FFmpeg source
+        uses: actions/cache@v4
+        with:
+          path: |
+            /tmp/ndk.zip
+            /tmp/ffsrc
+          key: ffmpeg-${{ env.FFMPEG_VERSION }}-ndk-${{ env.NDK_VERSION }}
+
+      # yt-dlp needs a real ffmpeg executable to merge separate video and audio
+      # streams. It ships as libffmpeg.so / libffprobe.so so Android extracts it
+      # somewhere the app is allowed to execute it.
+      - name: Build FFmpeg for Android arm64
+        run: |
+          set -euo pipefail
+          if [ ! -f /tmp/ndk.zip ]; then
+            curl -sL -o /tmp/ndk.zip "https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
+          fi
+          rm -rf /tmp/ndk && mkdir -p /tmp/ndk
+          unzip -q /tmp/ndk.zip -d /tmp/ndk
+          if [ ! -d "/tmp/ffsrc/FFmpeg-${FFMPEG_VERSION}" ]; then
+            mkdir -p /tmp/ffsrc
+            curl -sL -o /tmp/ff.tar.gz "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/${FFMPEG_VERSION}.tar.gz"
+            tar -xzf /tmp/ff.tar.gz -C /tmp/ffsrc
+          fi
+          NDK_DIR="/tmp/ndk/android-ndk-${NDK_VERSION}" \
+          FFMPEG_SRC="/tmp/ffsrc/FFmpeg-${FFMPEG_VERSION}" \
+            bash scripts/build-ffmpeg-android.sh
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp "/tmp/ffsrc/FFmpeg-${FFMPEG_VERSION}/ffmpeg"  app/src/main/jniLibs/arm64-v8a/libffmpeg.so
+          cp "/tmp/ffsrc/FFmpeg-${FFMPEG_VERSION}/ffprobe" app/src/main/jniLibs/arm64-v8a/libffprobe.so
+          ls -la app/src/main/jniLibs/arm64-v8a/
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -62,7 +107,7 @@ jobs:
         if: env.KEYSTORE_BASE64 != ''
         uses: actions/upload-artifact@v4
         with:
-          name: Off-v3.11.0-apk
+          name: Off-v4.0.0-apk
           path: app/build/outputs/apk/release/app-release-signed.apk
           if-no-files-found: error
           retention-days: 14
@@ -71,7 +116,7 @@ jobs:
         if: env.KEYSTORE_BASE64 == ''
         uses: actions/upload-artifact@v4
         with:
-          name: Off-v3.11.0-unsigned-apk
+          name: Off-v4.0.0-unsigned-apk
           path: app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
           retention-days: 14
