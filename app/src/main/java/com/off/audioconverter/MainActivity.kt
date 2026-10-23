@@ -741,7 +741,8 @@ private fun OffApp(initialLink: String? = null) {
                             context.startActivity(intent)
                         }
                     },
-                    onClearDownloads = { DownloadStore.clearFinished() }
+                    onClearDownloads = { DownloadStore.clearFinished() },
+                    onDownloadTrack = { downloadTrack(it) }
                 )
                 OffPage.SETTINGS -> SettingsScreen(
                     contentPadding = contentPadding,
@@ -1115,7 +1116,8 @@ private fun LibraryScreen(
     onShare: (SavedAudio) -> Unit,
     onDelete: (SavedAudio) -> Unit,
     onOpenUri: (String) -> Unit,
-    onClearDownloads: () -> Unit
+    onClearDownloads: () -> Unit,
+    onDownloadTrack: (Track) -> Unit
 ) {
     val context = LocalContext.current
     val favourites by LibraryStore.favourites.collectAsState()
@@ -1153,7 +1155,8 @@ private fun LibraryScreen(
                 onDelete = {
                     LibraryStore.deletePlaylist(openPlaylist.name)
                     openPlaylistName = null
-                }
+                },
+                onDownloadTrack = onDownloadTrack
             )
         } else when (tab) {
             0 -> {
@@ -1167,7 +1170,7 @@ private fun LibraryScreen(
                     favourites.forEachIndexed { index, track ->
                         LibraryTrackCard(
                             track = track,
-                            onPlay = { downloadTrack(favourites[index]) },
+                            onPlay = { onDownloadTrack(favourites[index]) },
                             onRemove = { LibraryStore.toggleFavourite(track) }
                         )
                     }
@@ -1383,7 +1386,8 @@ private fun LibraryTrackCard(
 private fun PlaylistDetail(
     playlist: Playlist,
     onBack: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onDownloadTrack: (Track) -> Unit
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1399,7 +1403,7 @@ private fun PlaylistDetail(
                 )
             }
             Button(
-                onClick = { playlist.tracks.firstOrNull()?.let { downloadTrack(it) } },
+                onClick = { playlist.tracks.firstOrNull()?.let { onDownloadTrack(it) } },
                 enabled = playlist.tracks.isNotEmpty()
             ) { Text("Download all") }
             IconButton(onClick = onDelete) {
@@ -1412,7 +1416,7 @@ private fun PlaylistDetail(
             playlist.tracks.forEachIndexed { index, track ->
                 LibraryTrackCard(
                     track = track,
-                    onPlay = { downloadTrack(playlist.tracks[index]) },
+                    onPlay = { onDownloadTrack(playlist.tracks[index]) },
                     onRemove = { LibraryStore.removeFromPlaylist(playlist.name, track.id) }
                 )
             }
