@@ -25,7 +25,7 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.FolderDown
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
@@ -317,7 +317,7 @@ fun OffHomeScreen(
         ) {
             Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    Icons.Default.FolderDown,
+                    Icons.Default.FolderOpen,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(25.dp)

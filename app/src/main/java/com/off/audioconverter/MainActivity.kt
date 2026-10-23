@@ -1459,7 +1459,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Text("Version 5.0.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
+                    "On-device video and audio downloading, plus an audio editor. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

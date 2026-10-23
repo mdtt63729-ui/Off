@@ -79,7 +79,7 @@ import com.off.audioconverter.download.DownloadStatus
 import com.off.audioconverter.download.DownloadStore
 import com.off.audioconverter.download.DownloadTask
 import com.off.audioconverter.library.LibraryStore
-import com.off.audioconverter.player.AddToPlaylistDialog
+import com.off.audioconverter.library.AddToPlaylistDialog
 import com.off.audioconverter.ui.components.BouncyChip
 import com.off.audioconverter.ui.components.SkeletonBox
 import com.off.audioconverter.ui.components.SkeletonImage

@@ -289,3 +289,5 @@ catch-all for every site they cannot read.
 - The download model now carries the source site, duration and final size, so those rows can show
   them.
 - The navigation bar's first tab is now labelled **Home** instead of Studio.
+
+- `AddToPlaylistDialog` moved out of the deleted player package into `library/`, since playlists are a library feature.
