@@ -51,7 +51,7 @@ class AudioConversionEngine(
         val bitrate = options.bitrateKbps.coerceIn(128, 320)
         val start = options.trimStartSeconds.coerceAtLeast(0f)
         val end = options.trimEndSeconds
-        val speed = options.speed.coerceIn(0.5f, 2f)
+        val speed = options.speed.coerceIn(0.25f, 2f)
         val volume = options.volume.coerceIn(0f, 1.5f)
         val fadeIn = options.fadeInSeconds.coerceIn(0f, 10f)
         val fadeOut = options.fadeOutSeconds.coerceIn(0f, 10f)
@@ -82,7 +82,7 @@ class AudioConversionEngine(
                 "exponential" -> "exp"
                 else -> "qsin"
             }
-            if (kotlin.math.abs(speed - 1f) > 0.001f) filters += "atempo=$speed"
+            filters += atempoFilters(speed)
             if (kotlin.math.abs(volume - 1f) > 0.001f) filters += "volume=$volume"
             if (fadeIn > 0f) filters += "afade=t=in:st=0:d=$fadeIn:curve=$curve"
             if (fadeOut > 0f && end > start) {
@@ -151,6 +151,26 @@ class AudioConversionEngine(
     }
 
     /** null = unknown, true/false = probed result. */
+    /**
+     * A single `atempo` only covers 0.5x-2x, so anything outside that range is chained.
+     * Without this the editor's 0.25x end silently did nothing.
+     */
+    private fun atempoFilters(speed: Float): List<String> {
+        if (kotlin.math.abs(speed - 1f) <= 0.001f) return emptyList()
+        val chain = mutableListOf<String>()
+        var remaining = speed
+        while (remaining < 0.5f) {
+            chain += "atempo=0.5"
+            remaining /= 0.5f
+        }
+        while (remaining > 2f) {
+            chain += "atempo=2.0"
+            remaining /= 2f
+        }
+        if (kotlin.math.abs(remaining - 1f) > 0.001f) chain += "atempo=$remaining"
+        return chain
+    }
+
     private fun probeHasAudio(file: File): Boolean? = try {
         val information = FFprobeKit.getMediaInformation(file.absolutePath).mediaInformation
         information?.streams?.any { it.type?.equals("audio", ignoreCase = true) == true }

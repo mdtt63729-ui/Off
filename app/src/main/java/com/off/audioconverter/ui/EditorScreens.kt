@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.VideoFile
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -267,6 +268,8 @@ fun OffEditorScreen(
     fadeOut: Float,
     playing: Boolean,
     positionMs: Long,
+    volume: Float,
+    onVolume: (Float) -> Unit,
     onSelect: (Float, Float) -> Unit,
     onSeek: (Long) -> Unit,
     onPlayPause: () -> Unit,
@@ -284,6 +287,9 @@ fun OffEditorScreen(
         animationSpec = androidx.compose.animation.core.tween(420),
         label = "frame-fade"
     )
+    // While the user has hold of the slider its own value wins; otherwise the playback
+    // ticker keeps overwriting it and the thumb jumps under the finger.
+    var scrubbing by remember { mutableStateOf<Float?>(null) }
 
     Column(
         Modifier
@@ -359,10 +365,15 @@ fun OffEditorScreen(
         )
 
         Spacer(Modifier.height(8.dp))
+        val sliderMax = totalMs.toFloat().coerceAtLeast(1f)
         Slider(
-            value = positionMs.toFloat().coerceIn(0f, totalMs.toFloat()),
-            onValueChange = { onSeek(it.toLong()) },
-            valueRange = 0f..totalMs.toFloat(),
+            value = (scrubbing ?: positionMs.toFloat()).coerceIn(0f, sliderMax),
+            onValueChange = {
+                scrubbing = it
+                onSeek(it.toLong())
+            },
+            onValueChangeFinished = { scrubbing = null },
+            valueRange = 0f..sliderMax,
             modifier = Modifier.padding(horizontal = 22.dp),
             colors = SliderDefaults.colors(
                 thumbColor = MaterialTheme.colorScheme.primary,
@@ -374,7 +385,11 @@ fun OffEditorScreen(
             Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(clock(positionMs / 1000f), color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+            Text(
+                clock((scrubbing ?: positionMs.toFloat()) / 1000f),
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 12.sp
+            )
             Text(
                 "Selected ${clock(trimEnd - trimStart)}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -413,6 +428,27 @@ fun OffEditorScreen(
                 modifier = Modifier.clickable { onSeek((positionMs + 15_000).coerceAtMost(totalMs)) }.padding(14.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 22.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.VolumeUp, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Slider(
+                value = volume,
+                onValueChange = onVolume,
+                valueRange = 0f..1.5f,
+                modifier = Modifier.weight(1f).padding(start = 10.dp),
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary,
+                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                    inactiveTrackColor = MaterialTheme.colorScheme.outline
+                )
+            )
+            Spacer(Modifier.width(10.dp))
+            Text("${(volume * 100).toInt()}%", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
 
         Spacer(Modifier.height(25.dp))
@@ -577,7 +613,6 @@ fun SpeedScreen(
                         value = speed,
                         onValueChange = onSpeed,
                         valueRange = 0.25f..2f,
-                        steps = 6,
                         colors = SliderDefaults.colors(
                             thumbColor = MaterialTheme.colorScheme.primary,
                             activeTrackColor = MaterialTheme.colorScheme.primary,
@@ -749,7 +784,6 @@ private fun FadeSliderCard(title: String, description: String, value: Float, onC
                 value = value,
                 onValueChange = onChange,
                 valueRange = 0f..10f,
-                steps = 9,
                 colors = SliderDefaults.colors(
                     thumbColor = MaterialTheme.colorScheme.primary,
                     activeTrackColor = MaterialTheme.colorScheme.primary,

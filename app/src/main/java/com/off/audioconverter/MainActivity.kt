@@ -255,7 +255,6 @@ private fun OffApp() {
     val editorPlayer = remember { ExoPlayer.Builder(context).build() }
     var editorPlaying by remember { mutableStateOf(false) }
     var editorPositionMs by remember { mutableLongStateOf(0L) }
-    var editorSeekTarget by remember { mutableStateOf<Long?>(null) }
     var editorPlayPauseRequest by remember { mutableIntStateOf(0) }
 
     // A real frame from the selected video, cropped 16:9 for the editor header.
@@ -347,12 +346,6 @@ private fun OffApp() {
             }
             editorPlayer.play()
         }
-    }
-
-    LaunchedEffect(editorSeekTarget) {
-        val target = editorSeekTarget ?: return@LaunchedEffect
-        editorPlayer.seekTo(target)
-        editorSeekTarget = null
     }
 
     LaunchedEffect(Unit) {
@@ -579,10 +572,12 @@ private fun OffApp() {
                     speed = speed,
                     fadeIn = fadeIn,
                     fadeOut = fadeOut,
+                    volume = volume,
+                    onVolume = { volume = it; settings.volume = it },
                     playing = editorPlaying,
                     positionMs = editorPositionMs,
                     onSelect = { newStart, newEnd -> trimStart = newStart; trimEnd = newEnd },
-                    onSeek = { editorSeekTarget = it },
+                    onSeek = { target -> editorPlayer.seekTo(target); editorPositionMs = target },
                     onPlayPause = { editorPlayPauseRequest += 1 },
                     onTrim = { page = OffPage.TRIM },
                     onSpeed = { page = OffPage.SPEED },
@@ -1471,7 +1466,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 3.10.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 3.11.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

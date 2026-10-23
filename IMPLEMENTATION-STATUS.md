@@ -145,3 +145,17 @@
   slot widths, the label fades and the indicator together, so nothing can drift a frame apart. The
   row always fills the bar, so the bar no longer shifts sideways as one slot opens and another
   closes, and labels fade and slide in behind the arriving pill.
+
+## v3.11.0 — sliders slide smoothly
+Three separate things made the sliders feel notchy; all three are fixed.
+- **The `steps` were removed.** The speed slider snapped in 6 steps and the fade sliders in 9,
+  which is exactly the "it jumps instead of sliding" feel. They are continuous now.
+- **The editor's seek slider no longer fights the playback ticker.** The position ticker was
+  overwriting the thumb while it was being dragged. The slider now keeps its own value for as long
+  as it is held, seeks straight into the player (no effect round trip), and the time readout
+  follows the finger.
+- **The equalizer band sliders no longer round-trip through the controller** on every frame; the
+  value is held locally while dragging.
+- The volume control is back in the editor, under the transport.
+- `atempo` is now chained, so the speed slider's full 0.25x-2x range actually works; a single
+  `atempo` only covers 0.5x-2x, so 0.25x used to do nothing.

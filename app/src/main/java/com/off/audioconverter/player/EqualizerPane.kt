@@ -20,6 +20,9 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -109,9 +112,16 @@ fun EqualizerPane(modifier: Modifier = Modifier) {
                         style = MaterialTheme.typography.labelSmall
                     )
                 }
+                // Held locally while dragging; the controller round trip lagged behind
+                // and made the thumb stutter.
+                var dragging by remember(band.index) { mutableStateOf<Int?>(null) }
                 Slider(
-                    value = band.levelMb.toFloat(),
-                    onValueChange = { EqualizerController.setBandLevel(band.index, it.toInt()) },
+                    value = (dragging ?: band.levelMb).toFloat(),
+                    onValueChange = {
+                        dragging = it.toInt()
+                        EqualizerController.setBandLevel(band.index, it.toInt())
+                    },
+                    onValueChangeFinished = { dragging = null },
                     valueRange = range.first.toFloat()..range.second.toFloat(),
                     enabled = enabled,
                     colors = SliderDefaults.colors(
