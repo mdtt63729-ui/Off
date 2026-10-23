@@ -156,9 +156,6 @@ import com.off.audioconverter.library.Playlist
 import com.off.audioconverter.music.MusicRepository
 import com.off.audioconverter.music.Track
 import com.off.audioconverter.music.MusicSearchScreen
-import com.off.audioconverter.player.FullPlayerOverlay
-import com.off.audioconverter.player.MiniPlayer
-import com.off.audioconverter.player.PlayerController
 import com.off.audioconverter.ui.SettingsStore
 import com.off.audioconverter.video.VideoDownloadScreen
 import com.off.audioconverter.ui.FadeScreen
@@ -274,7 +271,6 @@ private fun OffApp(initialLink: String? = null) {
     LaunchedEffect(initialLink) {
         if (!initialLink.isNullOrBlank()) page = OffPage.VIDEO
     }
-    var showPlayer by remember { mutableStateOf(false) }
 
     // Conversion state — restored from the settings store so it survives a restart.
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
@@ -332,9 +328,22 @@ private fun OffApp(initialLink: String? = null) {
 
     fun persistHistory() = saveHistory(context, history)
 
+    /**
+     * Off does not play anything in-app any more: a track from search or the library
+     * is something to download. This is the single place that starts one.
+     */
+    fun downloadTrack(track: Track) {
+        scope.launch {
+            runCatching {
+                val resolved = MusicRepository().resolveStream(track)
+                DownloadService.enqueue(context, track, resolved, UUID.randomUUID().toString())
+                snackbar.showSnackbar("Downloading “${track.title}”…")
+            }.onFailure { snackbar.showSnackbar(it.message ?: "Could not start the download.") }
+        }
+    }
+
     LaunchedEffect(Unit) {
         LibraryStore.init(context)
-        PlayerController.connect(context)
     }
 
     // Editor screens report what they just did through the app snackbar.
@@ -412,24 +421,16 @@ private fun OffApp(initialLink: String? = null) {
         }
     }
 
-    val playerMessage by PlayerController.message.collectAsState()
-    LaunchedEffect(playerMessage) {
-        playerMessage?.let {
-            snackbar.showSnackbar(it)
-            PlayerController.clearMessage()
-        }
-    }
-
     // Insets so the floating bars can overlay the content (edge to edge).
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBarBottom: Dp = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val topPad: Dp = statusBarTop + 74.dp
-    val bottomPad: Dp = navBarBottom + 176.dp
-    // Pages that show the navigation bar need room for it; the others only need
-    // room for the floating mini player, so they are not left with a big gap.
+    // With the mini player gone the bottom inset only has to clear the floating
+    // navigation bar, which is what bottomPad covers.
+    val bottomPad: Dp = navBarBottom + 104.dp
     val contentPadding = PaddingValues(
         top = topPad,
-        bottom = if (page in BOTTOM_PAGES) bottomPad else navBarBottom + 104.dp
+        bottom = if (page in BOTTOM_PAGES) bottomPad else navBarBottom + 28.dp
     )
 
     val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -831,11 +832,6 @@ private fun OffApp(initialLink: String? = null) {
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            MiniPlayer(
-                onExpand = { showPlayer = true },
-                onDismiss = { PlayerController.stop() },
-                modifier = Modifier.fillMaxWidth()
-            )
             if (page in BOTTOM_PAGES) {
                 FloatingNavBar(
                     items = listOf(
@@ -860,20 +856,6 @@ private fun OffApp(initialLink: String? = null) {
                 .padding(bottom = 200.dp)
         )
     }
-
-    FullPlayerOverlay(
-        visible = showPlayer,
-        onCollapse = { showPlayer = false },
-        onDownload = { track ->
-            scope.launch {
-                runCatching {
-                    val resolved = MusicRepository().resolveStream(track)
-                    DownloadService.enqueue(context, track, resolved, UUID.randomUUID().toString())
-                    snackbar.showSnackbar("Downloading “${track.title}”…")
-                }.onFailure { snackbar.showSnackbar(it.message ?: "Could not start the download.") }
-            }
-        }
-    )
 
     if (showDeleteCurrent) {
         AlertDialog(
@@ -1178,14 +1160,14 @@ private fun LibraryScreen(
                 if (favourites.isEmpty()) {
                     LibraryEmptyHint(
                         title = "No favourites yet",
-                        body = "Tap the heart on a track in the player or in search to keep it here."
+                        body = "Tap the heart on a track in search to keep it here."
                     )
                 } else {
                     SectionLabel("${favourites.size} favourite${if (favourites.size == 1) "" else "s"}")
                     favourites.forEachIndexed { index, track ->
                         LibraryTrackCard(
                             track = track,
-                            onPlay = { PlayerController.playQueue(favourites, index) },
+                            onPlay = { downloadTrack(favourites[index]) },
                             onRemove = { LibraryStore.toggleFavourite(track) }
                         )
                     }
@@ -1388,7 +1370,7 @@ private fun LibraryTrackCard(
                 )
             }
             IconButton(onClick = onPlay) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "Play ${track.title}")
+                Icon(Icons.Default.Download, contentDescription = "Download ${track.title}")
             }
             IconButton(onClick = onRemove) {
                 Icon(Icons.Default.DeleteOutline, contentDescription = "Remove ${track.title}")
@@ -1417,20 +1399,20 @@ private fun PlaylistDetail(
                 )
             }
             Button(
-                onClick = { PlayerController.playQueue(playlist.tracks, 0) },
+                onClick = { playlist.tracks.firstOrNull()?.let { downloadTrack(it) } },
                 enabled = playlist.tracks.isNotEmpty()
-            ) { Text("Play all") }
+            ) { Text("Download all") }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Default.DeleteOutline, contentDescription = "Delete playlist")
             }
         }
         if (playlist.tracks.isEmpty()) {
-            LibraryEmptyHint("Empty playlist", "Add tracks to it from the player or from search.")
+            LibraryEmptyHint("Empty playlist", "Add tracks to it from search.")
         } else {
             playlist.tracks.forEachIndexed { index, track ->
                 LibraryTrackCard(
                     track = track,
-                    onPlay = { PlayerController.playQueue(playlist.tracks, index) },
+                    onPlay = { downloadTrack(playlist.tracks[index]) },
                     onRemove = { LibraryStore.removeFromPlaylist(playlist.name, track.id) }
                 )
             }
@@ -1568,7 +1550,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 4.1.1", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 4.2.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

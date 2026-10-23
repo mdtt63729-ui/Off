@@ -79,7 +79,6 @@ import com.off.audioconverter.download.DownloadStore
 import com.off.audioconverter.download.DownloadTask
 import com.off.audioconverter.library.LibraryStore
 import com.off.audioconverter.player.AddToPlaylistDialog
-import com.off.audioconverter.player.PlayerController
 import com.off.audioconverter.ui.components.BouncyChip
 import com.off.audioconverter.ui.components.SkeletonBox
 import com.off.audioconverter.ui.components.SkeletonImage
@@ -140,11 +139,6 @@ fun MusicSearchScreen(modifier: Modifier = Modifier) {
     }
 
     val allTracks = response?.tracks.orEmpty()
-
-    fun playAt(track: Track) {
-        val list = allTracks.ifEmpty { listOf(track) }
-        PlayerController.playQueue(list, list.indexOf(track).coerceAtLeast(0))
-    }
 
     fun download(track: Track) {
         scope.launch {
@@ -226,7 +220,6 @@ fun MusicSearchScreen(modifier: Modifier = Modifier) {
                         item(key = "top") {
                             TopResultCard(
                                 track = top,
-                                onPlay = { playAt(top) },
                                 onDownload = { download(top) }
                             )
                         }
@@ -239,7 +232,6 @@ fun MusicSearchScreen(modifier: Modifier = Modifier) {
                                     TrackRow(
                                         track = track,
                                         task = downloads.firstOrNull { it.track.id == track.id },
-                                        onPlay = { playAt(track) },
                                         onDownload = { download(track) },
                                         onCancelDownload = { DownloadService.cancel(context) }
                                     )
@@ -303,9 +295,9 @@ private fun SectionHeader(label: String, count: Int) {
 }
 
 @Composable
-private fun TopResultCard(track: Track, onPlay: () -> Unit, onDownload: () -> Unit) {
+private fun TopResultCard(track: Track, onDownload: () -> Unit) {
     ElevatedCard(
-        modifier = Modifier.fillMaxWidth().clickable { onPlay() }
+        modifier = Modifier.fillMaxWidth().clickable { onDownload() }
     ) {
         Column(Modifier.padding(16.dp)) {
             Text(
@@ -347,19 +339,18 @@ private fun TopResultCard(track: Track, onPlay: () -> Unit, onDownload: () -> Un
                 }
                 Spacer(Modifier.width(8.dp))
                 FilledIconButton(
-                    onClick = onPlay,
+                    onClick = onDownload,
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = "Play ${track.title}")
+                    Icon(Icons.Default.Download, contentDescription = "Download ${track.title}")
                 }
             }
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onPlay) { Text("Play now") }
-                TextButton(onClick = onDownload) { Text("Download") }
+                Button(onClick = onDownload) { Text("Download") }
             }
         }
     }
@@ -369,7 +360,6 @@ private fun TopResultCard(track: Track, onPlay: () -> Unit, onDownload: () -> Un
 private fun TrackRow(
     track: Track,
     task: DownloadTask?,
-    onPlay: () -> Unit,
     onDownload: () -> Unit,
     onCancelDownload: () -> Unit
 ) {
@@ -409,9 +399,6 @@ private fun TrackRow(
                     Spacer(Modifier.height(3.dp))
                     SourceBadge(track)
                 }
-                IconButton(onClick = onPlay) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = "Play ${track.title}")
-                }
                 IconButton(
                     onClick = { if (busy) onCancelDownload() else onDownload() },
                     enabled = !done
@@ -441,16 +428,6 @@ private fun TrackRow(
                             text = { Text("Add to playlist") },
                             leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
                             onClick = { menuOpen = false; showPlaylist = true }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Play next") },
-                            leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
-                            onClick = { menuOpen = false; PlayerController.playNext(track) }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Add to queue") },
-                            leadingIcon = { Icon(Icons.Default.QueueMusic, contentDescription = null) },
-                            onClick = { menuOpen = false; PlayerController.addToQueue(track) }
                         )
                     }
                 }

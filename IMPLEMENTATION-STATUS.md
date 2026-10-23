@@ -256,3 +256,16 @@ catch-all for every site they cannot read.
   navigation bar. A message could be half-hidden behind a card, which is what the screenshot showed.
 - It is now declared **last** inside that `Box`, after the pages, the top bar and the nav bar, so it
   is drawn above all of them. Position and padding are unchanged.
+
+## v4.2.0 — Off is a downloader and an editor, not a player
+- **The full-screen player and the mini player are gone.** Off no longer plays anything in-app, so
+  neither is mounted any more, and the app no longer connects to the playback service at startup.
+- **Search is download-only.** The play button on every result row and on the top result is gone; the
+  row, the top card and its button all download. "Play next" and "Add to queue" are gone from the row
+  menu — there is no queue to add to.
+- **The Library follows suit.** A favourite or a playlist track now downloads rather than plays
+  ("Download all" instead of "Play all"), and the row button is a download arrow. Saved files still
+  open in whatever app the phone uses, as before.
+- The bottom inset no longer reserves room for a mini player, so sub-pages do not end with a gap.
+- The player classes (`PlayerController`, `PlayerUi`, `PlaybackService`) are left in the project
+  unused rather than deleted, so playback can be brought back without rewriting it.
