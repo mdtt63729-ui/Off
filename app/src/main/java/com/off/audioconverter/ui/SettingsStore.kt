@@ -31,6 +31,14 @@ class SettingsStore(context: Context) {
         get() = prefs.getFloat(KEY_FADE_OUT, 0f)
         set(value) = prefs.edit().putFloat(KEY_FADE_OUT, value).apply()
 
+    var fadeCurve: String
+        get() = prefs.getString(KEY_FADE_CURVE, "Smooth") ?: "Smooth"
+        set(value) = prefs.edit().putString(KEY_FADE_CURVE, value).apply()
+
+    var preservePitch: Boolean
+        get() = prefs.getBoolean(KEY_PRESERVE_PITCH, true)
+        set(value) = prefs.edit().putBoolean(KEY_PRESERVE_PITCH, value).apply()
+
     var reducedMotion: Boolean
         get() = prefs.getBoolean(KEY_REDUCED_MOTION, false)
         set(value) = prefs.edit().putBoolean(KEY_REDUCED_MOTION, value).apply()
@@ -71,6 +79,8 @@ class SettingsStore(context: Context) {
         const val KEY_VOLUME = "volume"
         const val KEY_FADE_IN = "fade_in"
         const val KEY_FADE_OUT = "fade_out"
+        const val KEY_FADE_CURVE = "fade_curve"
+        const val KEY_PRESERVE_PITCH = "preserve_pitch"
         const val KEY_REDUCED_MOTION = "reduced_motion"
         const val KEY_SAAVN = "source_saavn"
         const val KEY_YOUTUBE = "source_youtube"

@@ -20,7 +20,9 @@ data class ConversionOptions(
     val speed: Float = 1f,
     val fadeInSeconds: Float = 0f,
     val fadeOutSeconds: Float = 0f,
-    val volume: Float = 1f
+    val volume: Float = 1f,
+    /** "Linear", "Smooth" or "Exponential" — mapped onto FFmpeg's afade curves. */
+    val fadeCurve: String = "Smooth"
 )
 
 sealed interface ConversionResult {
@@ -74,13 +76,19 @@ class AudioConversionEngine(
 
             withContext(Dispatchers.Main) { onStatus("Extracting and processing audio…") }
             val filters = mutableListOf<String>()
+            // afade's curve names: tri (linear), qsin (smooth), exp (exponential).
+            val curve = when (options.fadeCurve.lowercase()) {
+                "linear" -> "tri"
+                "exponential" -> "exp"
+                else -> "qsin"
+            }
             if (kotlin.math.abs(speed - 1f) > 0.001f) filters += "atempo=$speed"
             if (kotlin.math.abs(volume - 1f) > 0.001f) filters += "volume=$volume"
-            if (fadeIn > 0f) filters += "afade=t=in:st=0:d=$fadeIn"
+            if (fadeIn > 0f) filters += "afade=t=in:st=0:d=$fadeIn:curve=$curve"
             if (fadeOut > 0f && end > start) {
                 val outputDuration = ((end - start) / speed).coerceAtLeast(0.1f)
                 val fadeStart = (outputDuration - fadeOut).coerceAtLeast(0f)
-                filters += "afade=t=out:st=$fadeStart:d=$fadeOut"
+                filters += "afade=t=out:st=$fadeStart:d=$fadeOut:curve=$curve"
             }
 
             var lastDetail: String? = null

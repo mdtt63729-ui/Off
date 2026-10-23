@@ -159,6 +159,11 @@ import com.off.audioconverter.player.MiniPlayer
 import com.off.audioconverter.player.PlayerController
 import com.off.audioconverter.ui.SettingsStore
 import com.off.audioconverter.video.VideoDownloadScreen
+import com.off.audioconverter.ui.FadeScreen
+import com.off.audioconverter.ui.OffEditorScreen
+import com.off.audioconverter.ui.ResetScreen
+import com.off.audioconverter.ui.SpeedScreen
+import com.off.audioconverter.ui.TrimScreen
 import com.off.audioconverter.ui.components.SkeletonBox
 import com.off.audioconverter.ui.components.SkeletonImage
 import com.off.audioconverter.ui.components.SkeletonLine
@@ -180,10 +185,31 @@ import java.io.File
 import java.io.FileInputStream
 import java.util.UUID
 
-private enum class OffPage { HOME, SEARCH, VIDEO, LIBRARY, EDITOR, PROGRESS, RESULT, SETTINGS }
+private enum class OffPage {
+    HOME, SEARCH, VIDEO, LIBRARY, EDITOR, TRIM, SPEED, FADE, RESET, PROGRESS, RESULT, SETTINGS
+}
 private data class SavedAudio(val id: String, val name: String, val uri: String, val createdAt: Long, val bytes: Long)
 
 private val BOTTOM_PAGES = listOf(OffPage.HOME, OffPage.SEARCH, OffPage.VIDEO, OffPage.LIBRARY)
+
+/**
+ * Rough "how deep in the app" rank, used to pick the direction of the page
+ * transition: going deeper slides forward, coming back slides the other way.
+ */
+private fun pageRank(page: OffPage): Int = when (page) {
+    OffPage.HOME -> 0
+    OffPage.SEARCH -> 1
+    OffPage.VIDEO -> 2
+    OffPage.LIBRARY -> 3
+    OffPage.EDITOR -> 10
+    OffPage.TRIM -> 11
+    OffPage.SPEED -> 12
+    OffPage.FADE -> 13
+    OffPage.RESET -> 14
+    OffPage.PROGRESS -> 20
+    OffPage.RESULT -> 21
+    OffPage.SETTINGS -> 22
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -219,6 +245,17 @@ private fun OffApp() {
     var fadeIn by remember { mutableFloatStateOf(settings.fadeIn) }
     var fadeOut by remember { mutableFloatStateOf(settings.fadeOut) }
     var volume by remember { mutableFloatStateOf(settings.volume) }
+    var fadeCurve by remember { mutableStateOf(settings.fadeCurve) }
+    var preservePitch by remember { mutableStateOf(settings.preservePitch) }
+    var editorNotice by remember { mutableStateOf<String?>(null) }
+
+    // The editor preview player lives above the pages, so it keeps playing while
+    // the Trim / Speed / Fade screens are open.
+    val editorPlayer = remember { ExoPlayer.Builder(context).build() }
+    var editorPlaying by remember { mutableStateOf(false) }
+    var editorPositionMs by remember { mutableLongStateOf(0L) }
+    var editorSeekTarget by remember { mutableStateOf<Long?>(null) }
+    var editorPlayPauseRequest by remember { mutableIntStateOf(0) }
     var status by remember { mutableStateOf(ConversionStatus.IDLE) }
     var conversionJobId by remember { mutableIntStateOf(0) }
     var statusMessage by remember { mutableStateOf("Ready when you are") }
@@ -237,6 +274,75 @@ private fun OffApp() {
     LaunchedEffect(Unit) {
         LibraryStore.init(context)
         PlayerController.connect(context)
+    }
+
+    // Editor screens report what they just did through the app snackbar.
+    LaunchedEffect(editorNotice) {
+        val message = editorNotice ?: return@LaunchedEffect
+        snackbar.showSnackbar(message)
+        editorNotice = null
+    }
+
+    // ---- editor preview player ----
+    DisposableEffect(editorPlayer) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                editorPlaying = isPlaying
+            }
+        }
+        editorPlayer.addListener(listener)
+        onDispose {
+            editorPlayer.removeListener(listener)
+            editorPlayer.release()
+        }
+    }
+
+    LaunchedEffect(selectedUri) {
+        val target = selectedUri
+        if (target != null) {
+            editorPlayer.setMediaItem(MediaItem.fromUri(target))
+            editorPlayer.prepare()
+        }
+    }
+
+    // Speed (and pitch) and volume follow the sliders live.
+    LaunchedEffect(speed, preservePitch) {
+        editorPlayer.setPlaybackParameters(
+            PlaybackParameters(speed, if (preservePitch) 1f else speed)
+        )
+    }
+    LaunchedEffect(volume) { editorPlayer.volume = volume.coerceIn(0f, 1.5f) }
+
+    LaunchedEffect(editorPlayPauseRequest) {
+        if (editorPlayPauseRequest == 0) return@LaunchedEffect
+        if (editorPlayer.isPlaying) {
+            editorPlayer.pause()
+        } else {
+            val startMs = (trimStart * 1000).toLong()
+            val endMs = (trimEnd * 1000).toLong()
+            val position = editorPlayer.currentPosition
+            if (position < startMs || (endMs > startMs && position >= endMs)) {
+                editorPlayer.seekTo(startMs)
+            }
+            editorPlayer.play()
+        }
+    }
+
+    LaunchedEffect(editorSeekTarget) {
+        val target = editorSeekTarget ?: return@LaunchedEffect
+        editorPlayer.seekTo(target)
+        editorSeekTarget = null
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            editorPositionMs = editorPlayer.currentPosition.coerceAtLeast(0L)
+            val endMs = (trimEnd * 1000).toLong()
+            if (editorPlaying && endMs > 0L && editorPositionMs >= endMs) {
+                editorPlayer.seekTo((trimStart * 1000).toLong())
+            }
+            delay(120)
+        }
     }
 
 
@@ -372,14 +478,61 @@ private fun OffApp() {
                 if (reducedMotion) {
                     fadeIn(tween(220)) togetherWith fadeOut(tween(160))
                 } else {
-                    (slideInHorizontally(tween(320)) { it / 5 } + fadeIn(tween(240)) + scaleIn(tween(320), initialScale = 0.94f)) togetherWith
-                        (slideOutHorizontally(tween(260)) { -it / 8 } + fadeOut(tween(160)) + scaleOut(tween(260), targetScale = 0.96f))
+                    // Deeper pages slide in from the right while the old one leaves to the
+                    // left; coming back is the exact mirror, so closing a page runs the
+                    // entrance backwards instead of playing the same animation again.
+                    val forward = pageRank(targetState) >= pageRank(initialState)
+                    val direction = if (forward) 1 else -1
+                    (slideInHorizontally(tween(340)) { direction * it / 4 } + fadeIn(tween(260)) +
+                        scaleIn(tween(340), initialScale = 0.94f)) togetherWith
+                        (slideOutHorizontally(tween(320)) { -direction * it / 4 } + fadeOut(tween(220)) +
+                            scaleOut(tween(320), targetScale = 0.94f))
                 }
             },
             label = "off-page-transition",
             modifier = Modifier.fillMaxSize()
         ) { target ->
             when (target) {
+                OffPage.TRIM -> TrimScreen(
+                    contentPadding = contentPadding,
+                    duration = durationSec,
+                    trimStart = trimStart,
+                    trimEnd = trimEnd,
+                    onSelect = { newStart, newEnd -> trimStart = newStart; trimEnd = newEnd },
+                    onNotify = { editorNotice = it }
+                )
+                OffPage.SPEED -> SpeedScreen(
+                    contentPadding = contentPadding,
+                    speed = speed,
+                    preservePitch = preservePitch,
+                    onSpeed = { speed = it; settings.speed = it },
+                    onPreservePitch = { preservePitch = it; settings.preservePitch = it },
+                    onNotify = { editorNotice = it }
+                )
+                OffPage.FADE -> FadeScreen(
+                    contentPadding = contentPadding,
+                    fadeIn = fadeIn,
+                    fadeOut = fadeOut,
+                    curve = fadeCurve,
+                    onFadeIn = { fadeIn = it; settings.fadeIn = it },
+                    onFadeOut = { fadeOut = it; settings.fadeOut = it },
+                    onCurve = { fadeCurve = it; settings.fadeCurve = it },
+                    onNotify = { editorNotice = it }
+                )
+                OffPage.RESET -> ResetScreen(
+                    contentPadding = contentPadding,
+                    onResetAll = {
+                        trimStart = 0f
+                        trimEnd = durationSec.coerceAtLeast(1).toFloat()
+                        speed = 1f; settings.speed = 1f
+                        fadeIn = 0f; settings.fadeIn = 0f
+                        fadeOut = 0f; settings.fadeOut = 0f
+                        volume = 1f; settings.volume = 1f
+                        preservePitch = true; settings.preservePitch = true
+                        page = OffPage.EDITOR
+                    },
+                    onNotify = { editorNotice = it }
+                )
                 OffPage.HOME -> HomeScreen(
                     contentPadding = contentPadding,
                     selectedName = selectedName,
@@ -392,20 +545,28 @@ private fun OffApp() {
                     modifier = Modifier.padding(contentPadding)
                 )
                 OffPage.VIDEO -> VideoDownloadScreen(contentPadding = contentPadding)
-                OffPage.EDITOR -> EditorScreen(
+                OffPage.EDITOR -> OffEditorScreen(
                     contentPadding = contentPadding,
-                    uri = selectedUri,
+                    artwork = artwork,
+                    artworkResolved = artworkResolved,
                     name = selectedName ?: "Selected video",
                     duration = durationSec,
                     bitrate = bitrate,
                     onBitrate = { bitrate = it; settings.bitrate = it },
-                    trimStart = trimStart, onTrimStart = { trimStart = it },
-                    trimEnd = trimEnd, onTrimEnd = { trimEnd = it },
-                    speed = speed, onSpeed = { speed = it; settings.speed = it },
-                    fadeIn = fadeIn, onFadeIn = { fadeIn = it; settings.fadeIn = it },
-                    fadeOut = fadeOut, onFadeOut = { fadeOut = it; settings.fadeOut = it },
-                    volume = volume, onVolume = { volume = it; settings.volume = it },
-                    onBack = { page = OffPage.HOME },
+                    trimStart = trimStart,
+                    trimEnd = trimEnd,
+                    speed = speed,
+                    fadeIn = fadeIn,
+                    fadeOut = fadeOut,
+                    playing = editorPlaying,
+                    positionMs = editorPositionMs,
+                    onSelect = { newStart, newEnd -> trimStart = newStart; trimEnd = newEnd },
+                    onSeek = { editorSeekTarget = it },
+                    onPlayPause = { editorPlayPauseRequest += 1 },
+                    onTrim = { page = OffPage.TRIM },
+                    onSpeed = { page = OffPage.SPEED },
+                    onFade = { page = OffPage.FADE },
+                    onReset = { page = OffPage.RESET },
                     onExport = {
                         val uri = selectedUri
                         if (uri != null) {
@@ -422,7 +583,8 @@ private fun OffApp() {
                                     speed = speed,
                                     fadeInSeconds = fadeIn,
                                     fadeOutSeconds = fadeOut,
-                                    volume = volume
+                                    volume = volume,
+                                    fadeCurve = fadeCurve
                                 )
                                 val result = engine.convert(uri, options) { message -> statusMessage = message }
                                 if (thisJobId == conversionJobId && status != ConversionStatus.CANCELLED) {
@@ -558,6 +720,10 @@ private fun OffApp() {
                                 OffPage.SEARCH -> "Search · Saavn + YouTube"
                                 OffPage.VIDEO -> "Download a video"
                                 OffPage.EDITOR -> "Audio editor"
+                                OffPage.TRIM -> "Trim"
+                                OffPage.SPEED -> "Playback speed"
+                                OffPage.FADE -> "Fade effects"
+                                OffPage.RESET -> "Reset edits"
                                 OffPage.PROGRESS -> "Export studio"
                                 OffPage.RESULT -> "Your audio is ready"
                                 OffPage.LIBRARY -> "Library & downloads"
@@ -754,307 +920,6 @@ private fun HomeScreen(
     }
 }
 
-@Composable
-private fun EditorScreen(
-    contentPadding: PaddingValues,
-    uri: Uri?,
-    name: String, duration: Int, bitrate: Int, onBitrate: (Int) -> Unit,
-    trimStart: Float, onTrimStart: (Float) -> Unit, trimEnd: Float, onTrimEnd: (Float) -> Unit,
-    speed: Float, onSpeed: (Float) -> Unit, fadeIn: Float, onFadeIn: (Float) -> Unit,
-    fadeOut: Float, onFadeOut: (Float) -> Unit, volume: Float, onVolume: (Float) -> Unit,
-    onBack: () -> Unit, onExport: () -> Unit
-) {
-    val context = LocalContext.current
-    val maxDuration = duration.coerceAtLeast(1).toFloat()
-
-    // ---- live preview: the controls act on what you hear, immediately ----
-    val previewPlayer = remember { ExoPlayer.Builder(context).build() }
-    var previewPlaying by remember { mutableStateOf(false) }
-    var previewPositionMs by remember { mutableLongStateOf(0L) }
-    var artwork by remember { mutableStateOf<ImageBitmap?>(null) }
-    var artworkResolved by remember { mutableStateOf(false) }
-
-    // A real frame from the video, cropped 16:9 for the header card.
-    LaunchedEffect(uri) {
-        artwork = null
-        val target = uri ?: return@LaunchedEffect
-        artworkResolved = false
-        artwork = withContext(Dispatchers.IO) {
-            runCatching {
-                val retriever = MediaMetadataRetriever()
-                retriever.setDataSource(context, target)
-                val frame = retriever.getFrameAtTime(1_000_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                retriever.release()
-                frame?.asImageBitmap()
-            }.getOrNull()
-        }
-        artworkResolved = true
-    }
-
-    val frameAlpha by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (artwork != null) 1f else 0f,
-        animationSpec = androidx.compose.animation.core.tween(420),
-        label = "frame-fade"
-    )
-
-    DisposableEffect(uri) {
-        if (uri != null) {
-            previewPlayer.setMediaItem(MediaItem.fromUri(uri))
-            previewPlayer.prepare()
-        }
-        val listener = object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                previewPlaying = isPlaying
-            }
-        }
-        previewPlayer.addListener(listener)
-        onDispose {
-            previewPlayer.removeListener(listener)
-            previewPlayer.release()
-        }
-    }
-
-    LaunchedEffect(speed) { previewPlayer.setPlaybackParameters(PlaybackParameters(speed)) }
-    LaunchedEffect(volume) { previewPlayer.volume = volume.coerceIn(0f, 1.5f) }
-
-    LaunchedEffect(uri) {
-        while (true) {
-            previewPositionMs = previewPlayer.currentPosition.coerceAtLeast(0L)
-            val startMs = (trimStart * 1000).toLong()
-            val endMs = (trimEnd * 1000).toLong()
-            if (previewPlaying && endMs > startMs && previewPositionMs >= endMs) {
-                previewPlayer.seekTo(startMs)
-            }
-            delay(120)
-        }
-    }
-
-    val totalMs = (trimEnd * 1000).toLong().coerceAtLeast(1L)
-    val played = (previewPositionMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(contentPadding)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
-    ) {
-        // ---- header: 16:9 artwork, name, format line ----
-        EditorCard {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                ) {
-                    val frame = artwork
-                    if (frame != null) {
-                        Image(
-                            bitmap = frame,
-                            contentDescription = "Video frame",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = frameAlpha }
-                        )
-                    } else if (!artworkResolved) {
-                        SkeletonBox(Modifier.fillMaxSize(), RoundedCornerShape(16.dp))
-                    } else {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.VideoFile,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(44.dp)
-                            )
-                        }
-                    }
-                }
-                Text(
-                    name,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    "${formatTime(duration)} · MP3 · $bitrate kbps",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        // ---- time labels ----
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(formatTime(0), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-            Text(
-                formatTime((previewPositionMs / 1000).toInt()),
-                color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.labelSmall
-            )
-            Text(formatTime(trimEnd.toInt()), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-        }
-
-        // ---- waveform: rounded bars, the played part in the accent colour ----
-        EditorCard(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier.fillMaxWidth().height(112.dp).padding(horizontal = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                repeat(54) { i ->
-                    val barHeight = (12 + ((i * 17 + i * i * 3) % 72)).dp
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .height(barHeight)
-                            .clip(CircleShape)
-                            .background(
-                                if (i < (54 * played).toInt()) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.outline
-                            )
-                    )
-                }
-            }
-        }
-
-        Slider(
-            value = previewPositionMs.toFloat().coerceIn(0f, totalMs.toFloat()),
-            onValueChange = { previewPlayer.seekTo(it.toLong()) },
-            valueRange = 0f..totalMs.toFloat()
-        )
-
-        // ---- quick tools ----
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            EditorTool(Icons.Default.ContentCut, "Trim", modifier = Modifier.weight(1f)) {
-                onTrimStart(0f); onTrimEnd(maxDuration)
-            }
-            EditorTool(Icons.Default.Speed, "Speed", modifier = Modifier.weight(1f)) { onSpeed(1f) }
-            EditorTool(Icons.Default.GraphicEq, "Fade", modifier = Modifier.weight(1f)) { onFadeIn(2f); onFadeOut(2f) }
-            EditorTool(Icons.Default.RestartAlt, "Reset", modifier = Modifier.weight(1f)) {
-                onTrimStart(0f); onTrimEnd(maxDuration); onSpeed(1f)
-                onFadeIn(0f); onFadeOut(0f); onVolume(1f)
-            }
-        }
-
-        // ---- transport ----
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { previewPlayer.seekTo((trimStart * 1000).toLong()) }) {
-                Icon(Icons.Default.SkipPrevious, contentDescription = "Back to start", tint = MaterialTheme.colorScheme.onSurface)
-            }
-            Spacer(Modifier.width(8.dp))
-            FilledIconButton(
-                onClick = {
-                    if (previewPlaying) {
-                        previewPlayer.pause()
-                    } else {
-                        val startMs = (trimStart * 1000).toLong()
-                        val endMs = (trimEnd * 1000).toLong()
-                        val position = previewPlayer.currentPosition
-                        if (position < startMs || (endMs > startMs && position >= endMs)) {
-                            previewPlayer.seekTo(startMs)
-                        }
-                        previewPlayer.play()
-                    }
-                },
-                enabled = uri != null,
-                modifier = Modifier.size(64.dp),
-                shape = CircleShape
-            ) {
-                Icon(
-                    if (previewPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (previewPlaying) "Pause preview" else "Play preview",
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            IconButton(onClick = { previewPlayer.seekTo((trimEnd * 1000).toLong()) }) {
-                Icon(Icons.Default.SkipNext, contentDescription = "Jump to end", tint = MaterialTheme.colorScheme.onSurface)
-            }
-        }
-
-        Text(
-            "${formatTime((previewPositionMs / 1000).toInt())} / ${formatTime(trimEnd.toInt())} · ${"%.2f".format(speed)}×",
-            modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelMedium
-        )
-
-        // ---- volume ----
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.VolumeUp, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Slider(
-                value = volume,
-                onValueChange = onVolume,
-                valueRange = 0f..1.5f,
-                steps = 5,
-                modifier = Modifier.weight(1f).padding(start = 8.dp)
-            )
-            Spacer(Modifier.width(8.dp))
-            Text("${(volume * 100).toInt()}%", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-        }
-
-        // ---- trim range ----
-        Text("Trim range", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text("Start · ${formatTime(trimStart.toInt())}", color = MaterialTheme.colorScheme.onSurface)
-        Slider(
-            value = trimStart.coerceIn(0f, (trimEnd - 0.1f).coerceAtLeast(0f)),
-            onValueChange = { onTrimStart(it.coerceAtMost(trimEnd - 0.1f)) },
-            valueRange = 0f..maxDuration
-        )
-        Text("End · ${formatTime(trimEnd.toInt())}", color = MaterialTheme.colorScheme.onSurface)
-        Slider(
-            value = trimEnd.coerceIn((trimStart + 0.1f).coerceAtMost(maxDuration), maxDuration),
-            onValueChange = { onTrimEnd(it.coerceAtLeast(trimStart + 0.1f)) },
-            valueRange = 0f..maxDuration
-        )
-        Text(
-            "Selected length: ${formatTime((trimEnd - trimStart).toInt().coerceAtLeast(0))}",
-            color = MaterialTheme.colorScheme.primary,
-            style = MaterialTheme.typography.labelLarge
-        )
-
-        // ---- fades ----
-        Text("Fade in · ${fadeIn.toInt()} sec", color = MaterialTheme.colorScheme.onSurface)
-        Slider(value = fadeIn, onValueChange = onFadeIn, valueRange = 0f..10f, steps = 9)
-        Text("Fade out · ${fadeOut.toInt()} sec", color = MaterialTheme.colorScheme.onSurface)
-        Slider(value = fadeOut, onValueChange = onFadeOut, valueRange = 0f..10f, steps = 9)
-
-        // ---- export ----
-        Text("Export quality", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(128, 192, 256, 320).forEach { kbps ->
-                AnimatedBitrateChip(kbps = kbps, selected = bitrate == kbps, onSelect = { onBitrate(kbps) })
-            }
-        }
-        Text(
-            "MP3 · $bitrate kbps · settings are remembered next time.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        Button(
-            onClick = onExport,
-            enabled = duration == 0 || trimEnd > trimStart,
-            modifier = Modifier.fillMaxWidth().height(52.dp)
-        ) {
-            Icon(Icons.Default.FileUpload, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("Export audio")
-        }
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-            Text("Choose a different video")
-        }
-        Spacer(Modifier.height(10.dp))
-    }
-}
-
-/** The rounded, flat card the editor screens are built from. */
-@Composable
 private fun EditorCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Card(
         modifier = modifier,
@@ -1584,7 +1449,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 3.8.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 3.9.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

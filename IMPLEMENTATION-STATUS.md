@@ -110,3 +110,25 @@
 - **Library**: favourite/playlist rows use the same image treatment.
 - **Editor**: the 16:9 header frame shimmers until the frame has been pulled out of the video,
   then fades in.
+
+## v3.9.0 — editor per the supplied UI, plus player and transition fixes
+- **Editor rebuilt to the supplied Off Audio Editor UI**: file row, WAVEFORM label, the canvas
+  waveform, playback slider, −15s / play / +15s transport, TOOLS row with Trim / Speed / Fade /
+  Reset cards (each with a subtitle), and an export card. The bitrate choice lives in that card.
+- **Trim directly on the waveform**: drag either edge of the selection. The selected stretch is
+  drawn in the accent colour and everything outside it in grey, with handles and a playhead.
+- **Trim / Speed / Fade / Reset are real screens**, not decoration:
+  - Trim: the same selection waveform, Select all, Save trim.
+  - Speed: 0.25×–2.0×, quick presets, Preserve pitch, Reset / Apply. Speed and pitch apply to the
+    live preview.
+  - Fade: an envelope preview, fade in/out sliders, Linear / Smooth / Exponential curves that are
+    passed to FFmpeg's `afade` (tri / qsin / exp), Clear / Apply.
+  - Reset: the confirmation screen; resets trim, speed, fades and volume.
+- **Fade in/out now visibly work**: the envelope updates as the sliders move, and the curve
+  reaches the export pipeline.
+- **Dismissing the mini player now clears the saved queue**, so the track no longer comes back the
+  next time the app is opened.
+- **Tapping the mini player opens the full player again**: the tap and the swipe-down dismiss are
+  now two separate gesture detectors, so the drag can no longer swallow the tap.
+- **Page transitions**: the exit is the mirror of the entrance, and the direction follows depth —
+  going deeper slides forward, closing a page slides back the other way.

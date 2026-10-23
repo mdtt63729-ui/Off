@@ -220,6 +220,17 @@ object PlayerController : Player.Listener {
         controller?.stop()
         _current.value = null
         _isPlaying.value = false
+        // Dismissing means "I am done with this". Clear the saved queue as well, or
+        // the same track comes back the next time the app is opened.
+        queue = emptyList()
+        index = -1
+        _queueTracks.value = emptyList()
+        _queueIndex.value = -1
+        _hasNext.value = false
+        _hasPrevious.value = false
+        _positionMs.value = 0L
+        _durationMs.value = 0L
+        prefs?.edit()?.remove(KEY_QUEUE)?.remove(KEY_INDEX)?.apply()
     }
 
     fun clearMessage() {

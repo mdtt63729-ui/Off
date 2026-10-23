@@ -11,6 +11,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -132,15 +133,17 @@ fun MiniPlayer(
                 .fillMaxWidth()
                 .offset { IntOffset(0, dragOffset.roundToInt()) }
                 .graphicsLayer { alpha = 1f - (dragOffset / 420f).coerceIn(0f, 0.65f) }
+                // Two separate detectors: a plain tap opens the full player, and a
+                // vertical drag dismisses. Keeping them apart means the drag gesture
+                // can no longer swallow the tap.
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { onExpand() })
+                }
                 .pointerInput(Unit) {
                     detectVerticalDragGestures(
                         onDragEnd = {
-                            if (dragOffset > dismissThreshold) {
-                                dragOffset = 0f
-                                onDismiss()
-                            } else {
-                                dragOffset = 0f
-                            }
+                            if (dragOffset > dismissThreshold) onDismiss()
+                            dragOffset = 0f
                         },
                         onVerticalDrag = { _, delta -> dragOffset = (dragOffset + delta).coerceAtLeast(0f) }
                     )
