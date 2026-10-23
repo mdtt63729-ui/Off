@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The tick, drawn inside the adaptive icon's safe zone (the central 72dp of the
+  108dp canvas) so no launcher mask can clip it. Colours sampled from the
+  original artwork.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M33,55 L45,67 L74,38"
+        android:strokeWidth="12"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="31"
+                android:startY="72"
+                android:endX="76"
+                android:endY="34">
+                <item android:offset="0" android:color="#FF0060F0" />
+                <item android:offset="0.5" android:color="#FF0090F0" />
+                <item android:offset="1" android:color="#FF00F0D0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

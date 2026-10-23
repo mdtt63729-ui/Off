@@ -9,5 +9,14 @@
         <item name="android:windowBackground">@color/off_window_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+
+        <!--
+          Android 12+ splash. The icon is now adaptive, so the system masks it to
+          the device's icon shape and fills it with our own background instead of
+          drawing a white box behind a square bitmap. The icon background is forced
+          transparent so no OEM can reintroduce that box.
+        -->
+        <item name="android:windowSplashScreenBackground">@color/off_window_background</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
     </style>
 </resources>

@@ -183,3 +183,16 @@ catch-all for every site they cannot read.
 - **ARM64 only.** Chaquopy builds a Python runtime per ABI and the bundled ffmpeg is arm64, so the
   app now ships `arm64-v8a` alone.
 - Only download what you own or have permission to save.
+
+## v4.0.1 — the launcher icon is adaptive now
+- The icon was a **legacy bitmap** (`mipmap-*/ic_launcher.png`), so Android treated it as a square image and
+  drew its own **white background** behind it on the Android 12+ splash screen. That is the white box with a
+  sharp-cornered icon inside it.
+- Added a proper **adaptive icon**: `mipmap-anydpi-v26/ic_launcher.xml` and `ic_launcher_round.xml`, with
+  `drawable/ic_launcher_background.xml` (the original navy gradient, sampled from the old artwork) and
+  `drawable/ic_launcher_foreground.xml` (the tick, drawn inside the 108dp canvas's safe zone so no launcher
+  mask can clip it).
+- The theme also forces `windowSplashScreenBackground` to Off's background and
+  `windowSplashScreenIconBackgroundColor` to transparent, so no OEM skin can put that white box back.
+- Result: the launcher masks the icon to the device's own shape and Off's own background fills it, so the
+  icon sits fully inside a rounded-corner box. This also fixes the icon on the home screen.
