@@ -107,7 +107,7 @@ jobs:
         if: env.KEYSTORE_BASE64 != ''
         uses: actions/upload-artifact@v4
         with:
-          name: Off-v4.0.1-apk
+          name: Off-v4.0.2-apk
           path: app/build/outputs/apk/release/app-release-signed.apk
           if-no-files-found: error
           retention-days: 14
@@ -116,7 +116,7 @@ jobs:
         if: env.KEYSTORE_BASE64 == ''
         uses: actions/upload-artifact@v4
         with:
-          name: Off-v4.0.1-unsigned-apk
+          name: Off-v4.0.2-unsigned-apk
           path: app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
           retention-days: 14

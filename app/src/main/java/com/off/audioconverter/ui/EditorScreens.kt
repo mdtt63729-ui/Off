@@ -53,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -123,30 +124,45 @@ private fun SelectionWaveform(
     trimEnd: Float,
     maxDuration: Float,
     progress: Float,
-    onSelect: (Float, Float) -> Unit,
+    onStartChange: (Float) -> Unit,
+    onEndChange: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val bars = remember { List(96) { i -> (0.16f + abs(sin(i * 0.47)) * 0.58f + abs(sin(i * 0.19 + 1.4)) * 0.26f).toFloat() } }
     val accent = MaterialTheme.colorScheme.primary
     val idle = MaterialTheme.colorScheme.outline
     val playhead = MaterialTheme.colorScheme.onSurface
-    var dragging by remember { mutableIntStateOf(-1) }
+
+    // Deliberately not Compose state. Writing state from the gesture handler would
+    // recompose mid-drag, and the handler must keep running while the finger is down.
+    val dragHandle = remember { intArrayOf(-1) }
+
+    // The pointer-input handler is created once and is not re-created as the trim
+    // values change, so reading `trimStart`/`trimEnd` directly would give the values
+    // from the first composition. That is exactly what made dragging one edge snap the
+    // other edge back to where it was: the handler echoed a stale copy of it.
+    val latestStart = rememberUpdatedState(trimStart)
+    val latestEnd = rememberUpdatedState(trimEnd)
 
     Canvas(
         modifier = modifier.pointerInput(maxDuration) {
             detectHorizontalDragGestures(
                 onDragStart = { offset ->
+                    // Pick up whichever edge is nearer the finger.
                     val fraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f) * maxDuration
-                    dragging = if (abs(fraction - trimStart) <= abs(fraction - trimEnd)) 0 else 1
+                    dragHandle[0] =
+                        if (abs(fraction - latestStart.value) <= abs(fraction - latestEnd.value)) 0 else 1
                 },
-                onDragEnd = { dragging = -1 },
-                onDragCancel = { dragging = -1 },
+                onDragEnd = { dragHandle[0] = -1 },
+                onDragCancel = { dragHandle[0] = -1 },
                 onHorizontalDrag = { change, _ ->
                     change.consume()
-                    val fraction = ((change.position.x / size.width.toFloat()).coerceIn(0f, 1f)) * maxDuration
-                    when (dragging) {
-                        0 -> onSelect(fraction.coerceAtMost(trimEnd - 0.2f).coerceAtLeast(0f), trimEnd)
-                        1 -> onSelect(trimStart, fraction.coerceAtLeast(trimStart + 0.2f).coerceAtMost(maxDuration))
+                    val fraction = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f) * maxDuration
+                    // Only ever move the edge being dragged. The screen clamps it, so
+                    // the other edge is never written from here at all.
+                    when (dragHandle[0]) {
+                        0 -> onStartChange(fraction)
+                        1 -> onEndChange(fraction)
                     }
                 }
             )
@@ -270,7 +286,8 @@ fun OffEditorScreen(
     positionMs: Long,
     volume: Float,
     onVolume: (Float) -> Unit,
-    onSelect: (Float, Float) -> Unit,
+    onTrimStart: (Float) -> Unit,
+    onTrimEnd: (Float) -> Unit,
     onSeek: (Long) -> Unit,
     onPlayPause: () -> Unit,
     onTrim: () -> Unit,
@@ -353,7 +370,8 @@ fun OffEditorScreen(
             trimEnd = trimEnd,
             maxDuration = maxDuration,
             progress = played,
-            onSelect = onSelect,
+            onStartChange = onTrimStart,
+            onEndChange = onTrimEnd,
             modifier = Modifier.fillMaxWidth().height(100.dp).padding(horizontal = 22.dp)
         )
         Spacer(Modifier.height(10.dp))
@@ -516,7 +534,9 @@ fun TrimScreen(
     duration: Int,
     trimStart: Float,
     trimEnd: Float,
-    onSelect: (Float, Float) -> Unit,
+    onTrimStart: (Float) -> Unit,
+    onTrimEnd: (Float) -> Unit,
+    onSelectAll: () -> Unit,
     onNotify: (String) -> Unit
 ) {
     val maxDuration = duration.coerceAtLeast(1).toFloat()
@@ -534,7 +554,8 @@ fun TrimScreen(
                         trimEnd = trimEnd,
                         maxDuration = maxDuration,
                         progress = 0f,
-                        onSelect = onSelect,
+                        onStartChange = onTrimStart,
+                        onEndChange = onTrimEnd,
                         modifier = Modifier.fillMaxWidth().height(120.dp)
                     )
                     Spacer(Modifier.height(16.dp))
@@ -547,7 +568,7 @@ fun TrimScreen(
             Spacer(Modifier.height(20.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(
-                    onClick = { onSelect(0f, maxDuration); onNotify("Full length selected") },
+                    onClick = { onSelectAll(); onNotify("Full length selected") },
                     modifier = Modifier.weight(1f).height(54.dp),
                     shape = RoundedCornerShape(15.dp),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)

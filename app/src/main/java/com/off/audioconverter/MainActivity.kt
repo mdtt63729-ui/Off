@@ -197,6 +197,23 @@ private val BOTTOM_PAGES = listOf(OffPage.HOME, OffPage.SEARCH, OffPage.VIDEO, O
  * Rough "how deep in the app" rank, used to pick the direction of the page
  * transition: going deeper slides forward, coming back slides the other way.
  */
+/** The smallest gap the trim range is allowed to have, in seconds. */
+private const val MIN_TRIM_GAP = 0.2f
+
+/**
+ * Clamping lives here, next to the state, rather than in the waveform's gesture
+ * handler. The handler is created once and keeps running with the values it started
+ * with, so anything it clamps against can be out of date; reading the state here
+ * always gives the current value.
+ */
+private fun clampTrimStart(value: Float, trimEnd: Float): Float =
+    value.coerceIn(0f, (trimEnd - MIN_TRIM_GAP).coerceAtLeast(0f))
+
+private fun clampTrimEnd(value: Float, trimStart: Float, durationSec: Int): Float {
+    val max = durationSec.coerceAtLeast(1).toFloat()
+    return value.coerceIn((trimStart + MIN_TRIM_GAP).coerceAtMost(max), max)
+}
+
 private fun pageRank(page: OffPage): Int = when (page) {
     OffPage.HOME -> 0
     OffPage.SEARCH -> 1
@@ -532,7 +549,12 @@ private fun OffApp(initialLink: String? = null) {
                     duration = durationSec,
                     trimStart = trimStart,
                     trimEnd = trimEnd,
-                    onSelect = { newStart, newEnd -> trimStart = newStart; trimEnd = newEnd },
+                    onTrimStart = { value -> trimStart = clampTrimStart(value, trimEnd) },
+                    onTrimEnd = { value -> trimEnd = clampTrimEnd(value, trimStart, durationSec) },
+                    onSelectAll = {
+                        trimStart = 0f
+                        trimEnd = durationSec.coerceAtLeast(1).toFloat()
+                    },
                     onNotify = { editorNotice = it }
                 )
                 OffPage.SPEED -> SpeedScreen(
@@ -596,7 +618,8 @@ private fun OffApp(initialLink: String? = null) {
                     onVolume = { volume = it; settings.volume = it },
                     playing = editorPlaying,
                     positionMs = editorPositionMs,
-                    onSelect = { newStart, newEnd -> trimStart = newStart; trimEnd = newEnd },
+                    onTrimStart = { value -> trimStart = clampTrimStart(value, trimEnd) },
+                    onTrimEnd = { value -> trimEnd = clampTrimEnd(value, trimStart, durationSec) },
                     onSeek = { target -> editorPlayer.seekTo(target); editorPositionMs = target },
                     onPlayPause = { editorPlayPauseRequest += 1 },
                     onTrim = { page = OffPage.TRIM },
@@ -1486,7 +1509,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 4.0.1", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 4.0.2", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

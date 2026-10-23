@@ -196,3 +196,20 @@ catch-all for every site they cannot read.
   `windowSplashScreenIconBackgroundColor` to transparent, so no OEM skin can put that white box back.
 - Result: the launcher masks the icon to the device's own shape and Off's own background fills it, so the
   icon sits fully inside a rounded-corner box. This also fixes the icon on the home screen.
+
+## v4.0.2 — dragging one trim edge no longer moves the other
+- **Symptom**: trim the end of the selection, then grab the start handle, and the end jumped back to
+  where it was before — e.g. End 00:20 became 00:24 the moment Start was dragged.
+- **Cause**: the waveform's `pointerInput` handler is created once and is *not* re-created as the trim
+  values change. It read `trimStart`/`trimEnd` straight from its parameters, so it was working with the
+  values captured on the first composition. Moving the start handle called
+  `onSelect(newStart, staleTrimEnd)` — which wrote the stale end back over the current one.
+- **Fix**, three parts:
+  1. The handler now moves **only the edge being dragged** (`onStartChange` / `onEndChange`), so it can
+     never write the other edge at all.
+  2. Clamping moved to `MainActivity`, next to the state, where `trimStart`/`trimEnd`/`durationSec` are
+     read from Compose state and are therefore always current.
+  3. `rememberUpdatedState` keeps the drag-start hit test (which edge is nearest the finger) current, and
+     the "which handle am I holding" flag is now a plain array rather than Compose state, so no
+     recomposition happens mid-drag.
+- Applies to both the editor waveform and the Trim screen, which share the component.
