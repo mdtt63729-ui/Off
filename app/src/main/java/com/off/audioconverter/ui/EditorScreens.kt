@@ -124,9 +124,10 @@ private fun SelectionWaveform(
     onSelect: (Float, Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val bars = remember { List(96) { i -> (0.16f + abs(sin(i * 0.47)) * 0.58f + abs(sin(i * 0.19 + 1.4)) * 0.26f) } }
+    val bars = remember { List(96) { i -> (0.16f + abs(sin(i * 0.47)) * 0.58f + abs(sin(i * 0.19 + 1.4)) * 0.26f).toFloat() } }
     val accent = MaterialTheme.colorScheme.primary
     val idle = MaterialTheme.colorScheme.outline
+    val playhead = MaterialTheme.colorScheme.onSurface
     var dragging by remember { mutableIntStateOf(-1) }
 
     Canvas(
@@ -182,7 +183,7 @@ private fun SelectionWaveform(
         // Playhead.
         val head = progress.coerceIn(0f, 1f) * size.width
         drawLine(
-            color = MaterialTheme.colorScheme.onSurface,
+            color = playhead,
             start = Offset(head, 0f),
             end = Offset(head, size.height),
             strokeWidth = 1.5.dp.toPx(),
@@ -194,7 +195,7 @@ private fun SelectionWaveform(
 /** The fade envelope preview on the Fade screen. */
 @Composable
 private fun FadeWave(fadeIn: Float, fadeOut: Float, modifier: Modifier = Modifier) {
-    val bars = remember { List(56) { i -> (0.2f + abs(sin(i * 0.63)) * 0.75f) } }
+    val bars = remember { List(56) { i -> (0.2f + abs(sin(i * 0.63)) * 0.75f).toFloat() } }
     val accent = MaterialTheme.colorScheme.primary
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Canvas(modifier) {
@@ -277,6 +278,11 @@ fun OffEditorScreen(
     val maxDuration = duration.coerceAtLeast(1).toFloat()
     val totalMs = (trimEnd * 1000).toLong().coerceAtLeast(1L)
     val played = (positionMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
+    val frameAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (artwork != null) 1f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(420),
+        label = "frame-fade"
+    )
 
     Column(
         Modifier
@@ -298,7 +304,7 @@ fun OffEditorScreen(
                         bitmap = artwork,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 1f }
+                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = frameAlpha }
                     )
                     !artworkResolved -> SkeletonBox(Modifier.fillMaxSize(), RoundedCornerShape(20.dp))
                     else -> Box(

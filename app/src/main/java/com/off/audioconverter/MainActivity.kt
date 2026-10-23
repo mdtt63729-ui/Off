@@ -256,6 +256,26 @@ private fun OffApp() {
     var editorPositionMs by remember { mutableLongStateOf(0L) }
     var editorSeekTarget by remember { mutableStateOf<Long?>(null) }
     var editorPlayPauseRequest by remember { mutableIntStateOf(0) }
+
+    // A real frame from the selected video, cropped 16:9 for the editor header.
+    var artwork by remember { mutableStateOf<ImageBitmap?>(null) }
+    var artworkResolved by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedUri) {
+        artwork = null
+        artworkResolved = false
+        val target = selectedUri ?: return@LaunchedEffect
+        artwork = withContext(Dispatchers.IO) {
+            runCatching {
+                val retriever = MediaMetadataRetriever()
+                retriever.setDataSource(context, target)
+                val frame = retriever.getFrameAtTime(1_000_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                retriever.release()
+                frame?.asImageBitmap()
+            }.getOrNull()
+        }
+        artworkResolved = true
+    }
     var status by remember { mutableStateOf(ConversionStatus.IDLE) }
     var conversionJobId by remember { mutableIntStateOf(0) }
     var statusMessage by remember { mutableStateOf("Ready when you are") }
@@ -920,6 +940,7 @@ private fun HomeScreen(
     }
 }
 
+@Composable
 private fun EditorCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Card(
         modifier = modifier,
