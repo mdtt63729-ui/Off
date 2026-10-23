@@ -213,3 +213,19 @@ catch-all for every site they cannot read.
      the "which handle am I holding" flag is now a plain array rather than Compose state, so no
      recomposition happens mid-drag.
 - Applies to both the editor waveform and the Trim screen, which share the component.
+
+## v4.0.3 — the video screen's switch animates as one piece
+- **The list under the switch swapped instantly.** Changing Video/Audio replaced the whole block
+  ("Quality / 932p" ↔ "Audio format / M4A") in a single frame while the chips above were still
+  cross-fading, which read as a jump. It is now an `AnimatedContent`: the outgoing list fades and
+  slides up while the incoming one fades and slides in, and the container's height animates with it
+  (`SizeTransform(clip = false)`).
+- **The Download button's label swapped instantly too** — "Download 932p" → "Download M4A · original"
+  in one frame. It cross-fades now, and the button keeps a fixed height so it cannot jump.
+- **The chips no longer sit permanently enlarged.** A selected chip used to stay 7% bigger for as long
+  as it was selected, so the two chips were always at different sizes and the bigger one could overlap
+  its neighbour. The pop is now a transient bounce: press dips it, selecting bounces it past its size
+  and it settles straight back to 1.0.
+- Note on the grey circle with the ring that shows up at the touch point: that is Android's **"Show
+  taps"** developer option drawing over the app, not something Off renders — it is drawn outside the
+  chip's clip, which an in-app ripple could never be. Turn it off in Settings → Developer options.

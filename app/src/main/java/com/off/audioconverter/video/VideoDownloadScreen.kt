@@ -1,5 +1,13 @@
 package com.off.audioconverter.video
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -292,56 +300,72 @@ fun VideoDownloadScreen(
                             )
                         }
 
-                        Text(
-                            if (mode == 0) "Quality" else "Audio format",
-                            style = MaterialTheme.typography.titleSmall
-                        )
+                        // The list under the switch used to be swapped outright the moment the
+                        // mode changed, so it jumped while the chips were still cross-fading.
+                        // It now cross-fades and slides with them.
+                        AnimatedContent(
+                            targetState = mode,
+                            transitionSpec = {
+                                (fadeIn(tween(240)) + slideInVertically(tween(300)) { it / 8 }) togetherWith
+                                    (fadeOut(tween(170)) + slideOutVertically(tween(240)) { -it / 8 }) using
+                                    SizeTransform(clip = false)
+                            },
+                            label = "download-mode",
+                            modifier = Modifier.fillMaxWidth()
+                        ) { activeMode ->
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    if (activeMode == 0) "Quality" else "Audio format",
+                                    style = MaterialTheme.typography.titleSmall
+                                )
 
-                        if (mode == 0) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                video.qualities.chunked(4).forEach { row ->
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        row.forEach { option ->
+                                if (activeMode == 0) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        video.qualities.chunked(4).forEach { row ->
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                row.forEach { option ->
+                                                    BouncyChip(
+                                                        selected = quality == option,
+                                                        onClick = { quality = option },
+                                                        label = option.label
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    quality?.let { option ->
+                                        Text(
+                                            if (option.muxed) {
+                                                "This rendition already contains audio — saved straight out."
+                                            } else {
+                                                "Video and audio arrive separately and are joined with FFmpeg after download."
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                } else {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        video.audioOptions.forEach { option ->
                                             BouncyChip(
-                                                selected = quality == option,
-                                                onClick = { quality = option },
+                                                selected = audio == option,
+                                                onClick = { audio = option },
                                                 label = option.label
                                             )
                                         }
                                     }
+                                    audio?.let { option ->
+                                        Text(
+                                            if (option.outputFormat == "mp3") {
+                                                "The audio is re-encoded to MP3 (${option.mp3BitrateKbps} kbps) after download and saved to Music/Off."
+                                            } else {
+                                                "The original audio stream is saved untouched to Music/Off."
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
-                            }
-                            quality?.let { option ->
-                                Text(
-                                    if (option.muxed) {
-                                        "This rendition already contains audio — saved straight out."
-                                    } else {
-                                        "Video and audio arrive separately and are joined with FFmpeg after download."
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        } else {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                video.audioOptions.forEach { option ->
-                                    BouncyChip(
-                                        selected = audio == option,
-                                        onClick = { audio = option },
-                                        label = option.label
-                                    )
-                                }
-                            }
-                            audio?.let { option ->
-                                Text(
-                                    if (option.outputFormat == "mp3") {
-                                        "The audio is re-encoded to MP3 (${option.mp3BitrateKbps} kbps) after download and saved to Music/Off."
-                                    } else {
-                                        "The original audio stream is saved untouched to Music/Off."
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
                             }
                         }
                     }
@@ -361,11 +385,21 @@ fun VideoDownloadScreen(
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Download ${selection?.label ?: ""}".trim(),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        // Cross-fade the label: it used to swap instantly while the chips
+                        // above were still animating.
+                        AnimatedContent(
+                            targetState = selection?.label ?: "",
+                            transitionSpec = {
+                                fadeIn(tween(210)) togetherWith fadeOut(tween(140))
+                            },
+                            label = "download-label"
+                        ) { label ->
+                            Text(
+                                "Download $label".trim(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }

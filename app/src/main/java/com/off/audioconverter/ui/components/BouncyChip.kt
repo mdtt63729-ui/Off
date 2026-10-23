@@ -2,6 +2,8 @@ package com.off.audioconverter.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -51,17 +53,23 @@ fun BouncyChip(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
 
-    val scale by animateFloatAsState(
-        targetValue = when {
-            !enabled -> 1f
-            pressed -> 0.90f
-            selected -> 1.07f
-            else -> 1f
-        },
-        // A low damping ratio is what makes the pop overshoot and spring back.
-        animationSpec = spring(dampingRatio = 0.40f, stiffness = Spring.StiffnessMedium),
-        label = "chip-scale"
-    )
+    // The chip pops past its size the instant it is picked and settles straight back
+    // to 1.0. It used to sit permanently 7% larger while selected, which meant the two
+    // chips were always at different sizes and the selected one could overlap its
+    // neighbour for the whole time it stayed selected.
+    val scale = remember { Animatable(1f) }
+    LaunchedEffect(selected, pressed, enabled) {
+        when {
+            !enabled -> scale.animateTo(1f, spring(dampingRatio = 0.80f, stiffness = Spring.StiffnessMediumLow))
+            pressed -> scale.animateTo(0.94f, spring(dampingRatio = 0.60f, stiffness = Spring.StiffnessHigh))
+            selected -> {
+                // A low damping ratio is what makes the pop overshoot before it settles.
+                scale.animateTo(1.06f, spring(dampingRatio = 0.34f, stiffness = Spring.StiffnessMedium))
+                scale.animateTo(1f, spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow))
+            }
+            else -> scale.animateTo(1f, spring(dampingRatio = 0.70f, stiffness = Spring.StiffnessMediumLow))
+        }
+    }
 
     val container by animateColorAsState(
         targetValue = when {
@@ -102,8 +110,8 @@ fun BouncyChip(
     Box(
         modifier
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                scaleX = scale.value
+                scaleY = scale.value
             }
             .clip(shape)
             .background(container)
@@ -160,16 +168,18 @@ fun BouncyChipWide(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
 
-    val scale by animateFloatAsState(
-        targetValue = when {
-            !enabled -> 1f
-            pressed -> 0.94f
-            selected -> 1.05f
-            else -> 1f
-        },
-        animationSpec = spring(dampingRatio = 0.42f, stiffness = Spring.StiffnessMedium),
-        label = "wide-chip-scale"
-    )
+    val scale = remember { Animatable(1f) }
+    LaunchedEffect(selected, pressed, enabled) {
+        when {
+            !enabled -> scale.animateTo(1f, spring(dampingRatio = 0.80f, stiffness = Spring.StiffnessMediumLow))
+            pressed -> scale.animateTo(0.95f, spring(dampingRatio = 0.60f, stiffness = Spring.StiffnessHigh))
+            selected -> {
+                scale.animateTo(1.04f, spring(dampingRatio = 0.36f, stiffness = Spring.StiffnessMedium))
+                scale.animateTo(1f, spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow))
+            }
+            else -> scale.animateTo(1f, spring(dampingRatio = 0.70f, stiffness = Spring.StiffnessMediumLow))
+        }
+    }
     val container by animateColorAsState(
         targetValue = if (selected) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -192,8 +202,8 @@ fun BouncyChipWide(
     Box(
         modifier
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                scaleX = scale.value
+                scaleY = scale.value
             }
             .clip(shape)
             .background(container)
