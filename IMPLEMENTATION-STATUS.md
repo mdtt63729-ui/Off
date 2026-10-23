@@ -269,3 +269,23 @@ catch-all for every site they cannot read.
 - The bottom inset no longer reserves room for a mini player, so sub-pages do not end with a gap.
 - The player classes (`PlayerController`, `PlayerUi`, `PlaybackService`) are left in the project
   unused rather than deleted, so playback can be brought back without rewriting it.
+
+## v5.0.0 — the player is gone for good, and there is a new home screen
+- **The player code is deleted, not just unhooked.** The whole `player` package is gone —
+  `PlayerController`, `PlayerUi`, `PlaybackService`, `EqualizerController`, `EqualizerPane` — along
+  with the `PlaybackService` entry and the media-playback permission in the manifest, and the
+  `media3-session` / `media3-ui` dependencies. `media3-exoplayer` stays, because the editor's live
+  preview uses it.
+- **Other dead code removed too**: `WaveformGenerator` (superseded by the drawn waveform), and the
+  editor helpers `EditorCard`, `EditorTool`, `AnimatedBitrateChip` and `WaveformPreview`, none of
+  which were reachable any more.
+- **New home screen**, built to the supplied design: the Off header with a Settings button, the
+  "Download anything." prompt, the URL card with a Go button, "Your downloads" with a newest/oldest
+  toggle, the download rows with a 16:10 thumbnail, duration badge, source, size and date, a
+  three-dot menu (Play, Details, Edit audio, Delete), the "Saved locally" footer, and the delete and
+  details dialogs. The rows are the **real downloads**, not sample data: the URL bar's Go button
+  hands the link to the downloader, Play opens the saved file, Edit audio opens it in the editor,
+  and Delete removes the download and its partial file.
+- The download model now carries the source site, duration and final size, so those rows can show
+  them.
+- The navigation bar's first tab is now labelled **Home** instead of Studio.

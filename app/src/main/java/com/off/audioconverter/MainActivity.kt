@@ -159,6 +159,8 @@ import com.off.audioconverter.music.MusicSearchScreen
 import com.off.audioconverter.ui.SettingsStore
 import com.off.audioconverter.video.VideoDownloadScreen
 import com.off.audioconverter.ui.FadeScreen
+import com.off.audioconverter.ui.OffHomeScreen
+import com.off.audioconverter.video.VideoDownloadService
 import com.off.audioconverter.ui.OffEditorScreen
 import com.off.audioconverter.ui.ResetScreen
 import com.off.audioconverter.ui.SpeedScreen
@@ -268,8 +270,13 @@ private fun OffApp(initialLink: String? = null) {
     }
 
     // A link that arrives later (share while Off is already open) opens the downloader.
+    // The home screen's Go button fills the same slot, so both routes behave the same.
+    var pendingLink by remember { mutableStateOf(initialLink) }
     LaunchedEffect(initialLink) {
-        if (!initialLink.isNullOrBlank()) page = OffPage.VIDEO
+        if (!initialLink.isNullOrBlank()) {
+            pendingLink = initialLink
+            page = OffPage.VIDEO
+        }
     }
 
     // Conversion state — restored from the settings store so it survives a restart.
@@ -592,18 +599,52 @@ private fun OffApp(initialLink: String? = null) {
                     },
                     onNotify = { editorNotice = it }
                 )
-                OffPage.HOME -> HomeScreen(
+                OffPage.HOME -> OffHomeScreen(
                     contentPadding = contentPadding,
-                    selectedName = selectedName,
-                    recentCount = history.size,
-                    onPick = { pickVideo.launch(arrayOf("video/*")) },
-                    onLibrary = { page = OffPage.LIBRARY },
-                    onSearch = { page = OffPage.SEARCH }
+                    onOpenLink = { link ->
+                        pendingLink = link
+                        page = OffPage.VIDEO
+                    },
+                    onSettings = { page = OffPage.SETTINGS },
+                    onOpen = { task ->
+                        val saved = task.savedUri
+                        if (saved == null) {
+                            scope.launch { snackbar.showSnackbar("That file has not been saved yet.") }
+                        } else {
+                            val isAudio = task.label.contains("MP3", true) ||
+                                task.label.contains("M4A", true)
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(Uri.parse(saved), if (isAudio) "audio/*" else "video/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            runCatching { context.startActivity(intent) }.onFailure {
+                                scope.launch { snackbar.showSnackbar("No app on this phone can open that file.") }
+                            }
+                        }
+                    },
+                    onEditAudio = { task ->
+                        val saved = task.savedUri
+                        if (saved == null) {
+                            scope.launch { snackbar.showSnackbar("That file has not been saved yet.") }
+                        } else {
+                            val uri = Uri.parse(saved)
+                            selectedUri = uri
+                            selectedName = task.savedName ?: task.title
+                            val known = queryDuration(context, uri)
+                            durationSec = if (known > 0) known else task.durationSec.toInt()
+                            trimStart = 0f
+                            trimEnd = durationSec.toFloat()
+                            status = ConversionStatus.IDLE
+                            page = OffPage.EDITOR
+                        }
+                    },
+                    onDelete = { task -> VideoDownloadService.delete(context, task.id) },
+                    onNotice = { message -> scope.launch { snackbar.showSnackbar(message) } }
                 )
                 OffPage.SEARCH -> MusicSearchScreen(
                     modifier = Modifier.padding(contentPadding)
                 )
-                OffPage.VIDEO -> VideoDownloadScreen(contentPadding = contentPadding, initialLink = initialLink)
+                OffPage.VIDEO -> VideoDownloadScreen(contentPadding = contentPadding, initialLink = pendingLink)
                 OffPage.EDITOR -> OffEditorScreen(
                     contentPadding = contentPadding,
                     artwork = artwork,
@@ -836,7 +877,7 @@ private fun OffApp(initialLink: String? = null) {
             if (page in BOTTOM_PAGES) {
                 FloatingNavBar(
                     items = listOf(
-                        NavItem("Studio", Icons.Default.Home),
+                        NavItem("Home", Icons.Default.Home),
                         NavItem("Search", Icons.Default.Search),
                         NavItem("Video", Icons.Default.Movie),
                         NavItem("Library", Icons.Default.LibraryMusic)
@@ -899,144 +940,6 @@ private fun OffApp(initialLink: String? = null) {
             },
             dismissButton = { OutlinedButton(onClick = { showDeleteDialog = null }) { Text("Cancel") } }
         )
-    }
-}
-
-@Composable
-private fun HomeScreen(
-    contentPadding: PaddingValues,
-    selectedName: String?,
-    recentCount: Int,
-    onPick: () -> Unit,
-    onLibrary: () -> Unit,
-    onSearch: () -> Unit
-) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(contentPadding)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
-    ) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(64.dp)) {
-                    Icon(Icons.Default.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.padding(16.dp))
-                }
-                Text("Make audio your own.", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(
-                    "Stream and download from JioSaavn and YouTube, or extract audio from a video. Everything plays in a full player with a mini player that follows you around.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Button(onClick = onSearch, modifier = Modifier.fillMaxWidth().height(54.dp)) {
-                    Icon(Icons.Default.Search, contentDescription = null); Spacer(Modifier.width(10.dp)); Text("Search music")
-                }
-                OutlinedButton(onClick = onPick, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                    Icon(Icons.Default.FolderOpen, contentDescription = null); Spacer(Modifier.width(10.dp))
-                    Text(if (selectedName == null) "Convert a video" else "Choose another video")
-                }
-            }
-        }
-        Text("Your workspace", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ElevatedCard(onClick = onLibrary, modifier = Modifier.weight(1f)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.LibraryMusic, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-                    Text("Library", style = MaterialTheme.typography.titleMedium)
-                    Text("$recentCount ${if (recentCount == 1) "item" else "items"}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            ElevatedCard(onClick = onPick, modifier = Modifier.weight(1f)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.Tune, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-                    Text("Audio editor", style = MaterialTheme.typography.titleMedium)
-                    Text("Trim · speed · fades", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Column {
-                    Text("Local by design", style = MaterialTheme.typography.titleSmall)
-                    Text("Conversion never uploads your media. Music search uses public catalogues.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EditorCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        content = content
-    )
-}
-
-/** One of the small square shortcuts above the transport controls. */
-@Composable
-private fun EditorTool(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    EditorCard(modifier.clickable(onClick = onClick)) {
-        Column(
-            Modifier.fillMaxWidth().padding(vertical = 14.dp, horizontal = 2.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Text(label, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}
-@Composable
-private fun AnimatedBitrateChip(kbps: Int, selected: Boolean, onSelect: () -> Unit) {
-    val scale by animateFloatAsState(
-        targetValue = if (selected) 1.08f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        label = "bitrate-scale"
-    )
-    FilterChip(
-        selected = selected,
-        onClick = onSelect,
-        label = { Text("$kbps") },
-        modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale }
-    )
-}
-
-@Composable
-private fun WaveformPreview() {
-    Canvas(Modifier.fillMaxWidth().height(76.dp).clip(MaterialTheme.shapes.large)) {
-        val count = 84
-        val gap = size.width / (count * 1.6f)
-        val barWidth = gap * 0.6f
-        for (i in 0 until count) {
-            val wave = (0.18f + ((i * 37) % 83) / 100f) * size.height
-            val x = i * gap + gap / 2
-            drawLine(
-                color = if (i < count * 0.72f) androidx.compose.ui.graphics.Color(0xFFFFB59E)
-                else androidx.compose.ui.graphics.Color(0xFF55515A),
-                start = androidx.compose.ui.geometry.Offset(x, (size.height - wave) / 2),
-                end = androidx.compose.ui.geometry.Offset(x, (size.height + wave) / 2),
-                strokeWidth = barWidth,
-                cap = StrokeCap.Round
-            )
-        }
     }
 }
 
@@ -1554,7 +1457,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 4.2.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 5.0.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Offline-first audio conversion plus a streaming music player. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

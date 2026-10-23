@@ -105,6 +105,8 @@ class VideoDownloadService : Service() {
         private const val EXTRA_LABEL = "label"
         private const val EXTRA_PAGE_URL = "pageUrl"
         private const val EXTRA_YTDLP_SELECTOR = "ytDlpSelector"
+        private const val EXTRA_SOURCE = "source"
+        private const val EXTRA_DURATION = "duration"
 
         /** yt-dlp's intermediate parts, e.g. name.f137.mp4, which are not the result. */
         private val INTERMEDIATE_PART = Regex("\\.f\\d+\\.")
@@ -124,6 +126,8 @@ class VideoDownloadService : Service() {
                 putExtra(EXTRA_LABEL, selection.label)
                 putExtra(EXTRA_PAGE_URL, selection.pageUrl)
                 putExtra(EXTRA_YTDLP_SELECTOR, selection.ytDlpSelector)
+                putExtra(EXTRA_SOURCE, info.source)
+                putExtra(EXTRA_DURATION, info.durationSec)
             }
             startForeground(context, intent)
         }
@@ -254,7 +258,9 @@ class VideoDownloadService : Service() {
             id = taskId,
             title = intent.getStringExtra(EXTRA_TITLE) ?: "Video",
             label = intent.getStringExtra(EXTRA_LABEL) ?: "",
-            thumbnailUrl = intent.getStringExtra(EXTRA_THUMB)
+            thumbnailUrl = intent.getStringExtra(EXTRA_THUMB),
+            source = intent.getStringExtra(EXTRA_SOURCE),
+            durationSec = intent.getLongExtra(EXTRA_DURATION, 0L)
         )
         val selection = DownloadSelection(
             label = task.label,
@@ -377,6 +383,7 @@ class VideoDownloadService : Service() {
                     stage = "Saved to $where",
                     savedName = name,
                     savedUri = outputUri?.toString() ?: legacyFile?.absolutePath,
+                    sizeBytes = finalFile.length(),
                     workDir = null,
                     selection = null
                 )

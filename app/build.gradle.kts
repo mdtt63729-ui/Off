@@ -14,8 +14,8 @@ android {
         applicationId = "com.off.audioconverter"
         minSdk = 26
         targetSdk = 35
-        versionCode = 23
-        versionName = "4.2.0"
+        versionCode = 24
+        versionName = "5.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         // Chaquopy builds a Python runtime per ABI, and the bundled ffmpeg is
@@ -99,8 +99,6 @@ dependencies {
 
     // Media3 / ExoPlayer: background playback, media session, mini + full player.
     implementation("androidx.media3:media3-exoplayer:1.5.1")
-    implementation("androidx.media3:media3-session:1.5.1")
-    implementation("androidx.media3:media3-ui:1.5.1")
 
     // YouTube search + audio stream resolution (drop-in for the retired extractor).
     implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.3")

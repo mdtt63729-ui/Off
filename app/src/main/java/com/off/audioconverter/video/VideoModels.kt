@@ -72,6 +72,11 @@ data class VideoDownloadTask(
     val savedName: String? = null,
     val savedUri: String? = null,
     val message: String? = null,
+    /** Which site it came from, shown on the home screen. */
+    val source: String? = null,
+    val durationSec: Long = 0L,
+    /** Filled in when the file lands in MediaStore. */
+    val sizeBytes: Long = 0L,
     /** Where the half-finished download lives, so a paused one can pick up again. */
     val workDir: String? = null,
     /** Everything needed to restart the download after a pause. */
