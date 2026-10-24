@@ -303,3 +303,10 @@ catch-all for every site they cannot read.
 - The search notice is padded so it does not sit behind the bar either.
 - The other screens were already scrollable columns, where a bottom inset is part of the scroll and
   does not create a band, so they are unchanged.
+
+## v5.0.2 — one header on the home screen, not two
+- The home screen had its **own** header (the app-icon tile, "Off", "Video downloader" and a
+  Settings button) while the app's top bar above it already showed "Off", a page subtitle and the
+  same Settings button — so the screen opened with two titles and two gears.
+- The home screen's header row is gone. Its information moved to the top bar, which now reads
+  **"Off · Video downloader"** on the home page, so nothing was lost.

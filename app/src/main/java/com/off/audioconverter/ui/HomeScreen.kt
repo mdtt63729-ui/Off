@@ -30,12 +30,10 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -89,7 +87,6 @@ private val Success = Color(0xFF9DC8A7)
 fun OffHomeScreen(
     contentPadding: PaddingValues,
     onOpenLink: (String) -> Unit,
-    onSettings: () -> Unit,
     onOpen: (VideoDownloadTask) -> Unit,
     onEditAudio: (VideoDownloadTask) -> Unit,
     onDelete: (VideoDownloadTask) -> Unit,
@@ -114,34 +111,9 @@ fun OffHomeScreen(
             .padding(horizontal = 18.dp)
             .padding(top = 10.dp, bottom = 28.dp)
     ) {
-        // ---- header ----
-        Row(
-            Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 24.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier.size(46.dp).clip(RoundedCornerShape(15.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.Movie,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(26.dp)
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Off", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                Text("Video downloader", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            IconButton(onClick = onSettings) {
-                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.onSurface)
-            }
-        }
-
         // ---- paste a link ----
+        // No header row here: the app's own top bar already shows "Off", the page
+        // subtitle and the Settings action, so a second one just duplicated it.
         Text(
             "Download anything.",
             fontSize = 27.sp,
