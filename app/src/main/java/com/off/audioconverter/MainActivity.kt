@@ -1105,7 +1105,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 6.0.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 6.0.1", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "On-device video and audio downloading, plus an audio editor. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

@@ -21,6 +21,7 @@ import androidx.core.app.ServiceCompat
 import com.off.audioconverter.MainActivity
 import com.off.audioconverter.music.MusicSource
 import com.off.audioconverter.music.ResolvedAudio
+import com.off.audioconverter.ui.CrashLog
 import com.off.audioconverter.music.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -152,7 +153,7 @@ class DownloadService : Service() {
         val taskId = intent?.getStringExtra(EXTRA_ID)
         val track = intent?.let { trackFrom(it) }
         if (taskId == null || track == null) {
-            if (pending.isEmpty() && worker?.isActive != true) stopSelf()
+            enterForegroundAndStop()
             return START_NOT_STICKY
         }
         val task = DownloadTask(id = taskId, track = track, status = DownloadStatus.QUEUED)
@@ -164,6 +165,29 @@ class DownloadService : Service() {
         }
         return START_NOT_STICKY
     }
+
+    /**
+     * Started with `startForegroundService`, so the foreground obligation has to be
+     * met even when there is nothing to do — returning without it makes the system
+     * kill the app.
+     */
+    private fun enterForegroundAndStop() {
+        if (pending.isEmpty() && worker?.isActive != true) {
+            runCatching { startForegroundCompat(buildIdleNotification()) }
+            runCatching { stopForegroundCompat() }
+            stopSelf()
+        }
+    }
+
+    private fun buildIdleNotification(): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle("Off")
+            .setContentText("Nothing to download")
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
 
     private suspend fun drainQueue() {
         while (true) {

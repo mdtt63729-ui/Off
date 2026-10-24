@@ -326,3 +326,19 @@ catch-all for every site they cannot read.
   stream; those now become "Photo" entries in the picker and are saved to **Pictures/Off** with the
   right image MIME type.
 - The download rows on Home keep the pause/resume-on-the-thumbnail behaviour and the progress bar.
+
+## v6.0.1 — the download crash, found and fixed
+- **Symptom.** Paste a link, tap Download, and the app vanished with no message.
+- **Cause.** The download service refused any request whose selection had neither a `videoUrl` nor
+  an `audioUrl`. That is *every yt-dlp link* — Instagram, TikTok, and photos — because yt-dlp fetches
+  the file itself and never hands over a stream URL. The refusal path called `stopSelf()` **without
+  ever calling `startForeground()`**. Android had started the service with `startForegroundService`,
+  so it was waiting for that call; when the service went away without making it, the system killed
+  the whole process. That is the crash, and it is why it looked reasonless: nothing was logged by the
+  app because the app was not the one deciding.
+- **Fix.** The guard now also accepts a yt-dlp selection, and no path may leave a
+  `startForegroundService` start without entering the foreground first: the "nothing to do" paths
+  post an idle notification, enter the foreground, and only then stop. The failure handler does the
+  same. The music download service had the identical pattern and got the identical treatment.
+- **Also fixed:** the image flag is passed through to the service, so a photo link is saved to
+  Pictures/Off with an image MIME type rather than being written out as a video.

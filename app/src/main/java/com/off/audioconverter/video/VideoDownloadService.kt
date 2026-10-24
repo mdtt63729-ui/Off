@@ -106,6 +106,7 @@ class VideoDownloadService : Service() {
         private const val EXTRA_PAGE_URL = "pageUrl"
         private const val EXTRA_YTDLP_SELECTOR = "ytDlpSelector"
         private const val EXTRA_SOURCE = "source"
+        private const val EXTRA_IS_IMAGE = "isImage"
         private const val EXTRA_DURATION = "duration"
 
         /** yt-dlp's intermediate parts, e.g. name.f137.mp4, which are not the result. */
@@ -128,6 +129,7 @@ class VideoDownloadService : Service() {
                 putExtra(EXTRA_YTDLP_SELECTOR, selection.ytDlpSelector)
                 putExtra(EXTRA_SOURCE, info.source)
                 putExtra(EXTRA_DURATION, info.durationSec)
+                putExtra(EXTRA_IS_IMAGE, selection.isImage)
             }
             startForeground(context, intent)
         }
@@ -221,6 +223,9 @@ class VideoDownloadService : Service() {
             return handleCommand(intent)
         } catch (t: Throwable) {
             CrashLog.record(this, "Download service failed to start", t)
+            // Enter the foreground before bowing out, for the same reason as above.
+            runCatching { startForegroundCompat(buildIdleNotification()) }
+            runCatching { stopForegroundCompat() }
             runCatching { stopSelf() }
             return START_NOT_STICKY
         }
@@ -230,6 +235,10 @@ class VideoDownloadService : Service() {
         if (intent?.action == ACTION_CANCEL) {
             cancelled = true
             discardWorkDir = true
+            if (pending.isEmpty() && worker?.isActive != true) {
+                runCatching { stopForegroundCompat() }
+                stopSelf()
+            }
             return START_NOT_STICKY
         }
 
@@ -238,7 +247,7 @@ class VideoDownloadService : Service() {
             val task = id?.let { VideoDownloadStore.find(it) }
             val selection = task?.selection
             if (task == null || selection == null) {
-                if (pending.isEmpty() && worker?.isActive != true) stopSelf()
+                enterForegroundAndStop()
                 return START_NOT_STICKY
             }
             enqueue(task, selection, resume = true)
@@ -249,8 +258,11 @@ class VideoDownloadService : Service() {
         val format = intent?.getStringExtra(EXTRA_FORMAT) ?: "mp4"
         val videoUrl = intent?.getStringExtra(EXTRA_VIDEO_URL)
         val audioUrl = intent?.getStringExtra(EXTRA_AUDIO_URL)
-        if (taskId == null || (videoUrl == null && audioUrl == null)) {
-            if (pending.isEmpty() && worker?.isActive != true) stopSelf()
+        val ytDlpSelector = intent?.getStringExtra(EXTRA_YTDLP_SELECTOR)
+        // A yt-dlp job has neither a video nor an audio URL — yt-dlp fetches the file
+        // itself — so it must not be treated as an empty request.
+        if (taskId == null || (videoUrl == null && audioUrl == null && ytDlpSelector == null)) {
+            enterForegroundAndStop()
             return START_NOT_STICKY
         }
 
@@ -270,7 +282,8 @@ class VideoDownloadService : Service() {
             outputFormat = format,
             mp3BitrateKbps = intent.getIntExtra(EXTRA_MP3_BITRATE, -1).takeIf { it > 0 },
             pageUrl = intent.getStringExtra(EXTRA_PAGE_URL),
-            ytDlpSelector = intent.getStringExtra(EXTRA_YTDLP_SELECTOR)
+            ytDlpSelector = ytDlpSelector,
+            isImage = intent.getBooleanExtra(EXTRA_IS_IMAGE, false)
         )
         VideoDownloadStore.add(task)
         enqueue(task, selection, resume = false)
@@ -285,6 +298,30 @@ class VideoDownloadService : Service() {
             worker = scope.launch { drainQueue() }
         }
     }
+
+    /**
+     * The system starts this service with `startForegroundService`, and it kills the
+     * whole app if the service returns without ever entering the foreground. So even
+     * the "nothing to do" paths have to call `startForeground` once before stopping.
+     */
+    private fun enterForegroundAndStop() {
+        if (pending.isEmpty() && worker?.isActive != true) {
+            startForegroundCompat(buildIdleNotification())
+            runCatching { stopForegroundCompat() }
+            stopSelf()
+        }
+    }
+
+    private fun buildIdleNotification(): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle("Off")
+            .setContentText("Nothing to download")
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(contentIntent())
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
 
     private suspend fun drainQueue() {
         while (true) {
