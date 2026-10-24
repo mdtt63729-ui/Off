@@ -338,21 +338,42 @@ class VideoDownloadService : Service() {
 
             updateProgress(task, selection, 0.97f, "Saving")
 
-            val extension = finalFile.extension.ifBlank { if (selection.isAudio) "m4a" else "mp4" }
-            val mime = when (extension) {
-                "mp3" -> "audio/mpeg"
-                "m4a", "aac" -> "audio/mp4"
-                "webm" -> if (selection.isAudio) "audio/webm" else "video/webm"
-                "mkv" -> "video/x-matroska"
+            val extension = finalFile.extension.ifBlank {
+                when {
+                    selection.isImage -> "jpg"
+                    selection.isAudio -> "m4a"
+                    else -> "mp4"
+                }
+            }
+            val mime = when {
+                selection.isImage -> when (extension.lowercase()) {
+                    "png" -> "image/png"
+                    "webp" -> "image/webp"
+                    "gif" -> "image/gif"
+                    else -> "image/jpeg"
+                }
+                extension == "mp3" -> "audio/mpeg"
+                extension == "m4a" || extension == "aac" -> "audio/mp4"
+                extension == "webm" -> if (selection.isAudio) "audio/webm" else "video/webm"
+                extension == "mkv" -> "video/x-matroska"
                 else -> if (selection.isAudio) "audio/mp4" else "video/mp4"
             }
             val name = buildFileName(task.title, extension)
             val isAudio = mime.startsWith("audio/")
+            val isImage = mime.startsWith("image/")
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val collection = if (isAudio) MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-                else MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                val relative = (if (isAudio) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_MOVIES) + "/Off"
+                val collection = when {
+                    isImage -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    isAudio -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                    else -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                }
+                val folder = when {
+                    isImage -> Environment.DIRECTORY_PICTURES
+                    isAudio -> Environment.DIRECTORY_MUSIC
+                    else -> Environment.DIRECTORY_MOVIES
+                }
+                val relative = "$folder/Off"
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                     put(MediaStore.MediaColumns.MIME_TYPE, mime)
@@ -368,14 +389,22 @@ class VideoDownloadService : Service() {
                 }
                 contentResolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
             } else {
-                val dirName = if (isAudio) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_MOVIES
+                val dirName = when {
+                    isImage -> Environment.DIRECTORY_PICTURES
+                    isAudio -> Environment.DIRECTORY_MUSIC
+                    else -> Environment.DIRECTORY_MOVIES
+                }
                 val dir = getExternalFilesDir(dirName) ?: filesDir
                 val dest = File(dir, name)
                 finalFile.inputStream().use { input -> FileOutputStream(dest).use { input.copyTo(it) } }
                 legacyFile = dest
             }
 
-            val where = if (isAudio) "Music/Off" else "Movies/Off"
+            val where = when {
+                isImage -> "Pictures/Off"
+                isAudio -> "Music/Off"
+                else -> "Movies/Off"
+            }
             VideoDownloadStore.update(task.id) {
                 it.copy(
                     status = VideoDownloadStatus.COMPLETED,

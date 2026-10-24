@@ -157,8 +157,9 @@ import com.off.audioconverter.music.MusicRepository
 import com.off.audioconverter.music.Track
 import com.off.audioconverter.music.MusicSearchScreen
 import com.off.audioconverter.ui.SettingsStore
-import com.off.audioconverter.video.VideoDownloadScreen
+import com.off.audioconverter.video.VideoFetchSection
 import com.off.audioconverter.ui.FadeScreen
+import com.off.audioconverter.ui.StudioScreen
 import com.off.audioconverter.ui.OffHomeScreen
 import com.off.audioconverter.video.VideoDownloadService
 import com.off.audioconverter.ui.OffEditorScreen
@@ -188,11 +189,11 @@ import java.io.FileInputStream
 import java.util.UUID
 
 private enum class OffPage {
-    HOME, SEARCH, VIDEO, LIBRARY, EDITOR, TRIM, SPEED, FADE, RESET, PROGRESS, RESULT, SETTINGS
+    HOME, SEARCH, STUDIO, EDITOR, TRIM, SPEED, FADE, RESET, PROGRESS, RESULT, SETTINGS
 }
 private data class SavedAudio(val id: String, val name: String, val uri: String, val createdAt: Long, val bytes: Long)
 
-private val BOTTOM_PAGES = listOf(OffPage.HOME, OffPage.SEARCH, OffPage.VIDEO, OffPage.LIBRARY)
+private val BOTTOM_PAGES = listOf(OffPage.HOME, OffPage.SEARCH, OffPage.STUDIO)
 
 /**
  * Rough "how deep in the app" rank, used to pick the direction of the page
@@ -218,8 +219,7 @@ private fun clampTrimEnd(value: Float, trimStart: Float, durationSec: Int): Floa
 private fun pageRank(page: OffPage): Int = when (page) {
     OffPage.HOME -> 0
     OffPage.SEARCH -> 1
-    OffPage.VIDEO -> 2
-    OffPage.LIBRARY -> 3
+    OffPage.STUDIO -> 2
     OffPage.EDITOR -> 10
     OffPage.TRIM -> 11
     OffPage.SPEED -> 12
@@ -266,7 +266,7 @@ private fun OffApp(initialLink: String? = null) {
     val settings = remember { SettingsStore(context) }
 
     var page by remember {
-        mutableStateOf(if (initialLink.isNullOrBlank()) OffPage.HOME else OffPage.VIDEO)
+        mutableStateOf(OffPage.HOME)
     }
 
     // A link that arrives later (share while Off is already open) opens the downloader.
@@ -275,7 +275,7 @@ private fun OffApp(initialLink: String? = null) {
     LaunchedEffect(initialLink) {
         if (!initialLink.isNullOrBlank()) {
             pendingLink = initialLink
-            page = OffPage.VIDEO
+            page = OffPage.HOME
         }
     }
 
@@ -601,10 +601,7 @@ private fun OffApp(initialLink: String? = null) {
                 )
                 OffPage.HOME -> OffHomeScreen(
                     contentPadding = contentPadding,
-                    onOpenLink = { link ->
-                        pendingLink = link
-                        page = OffPage.VIDEO
-                    },
+                    initialLink = pendingLink,
                     onOpen = { task ->
                         val saved = task.savedUri
                         if (saved == null) {
@@ -644,7 +641,12 @@ private fun OffApp(initialLink: String? = null) {
                     topPadding = topPad,
                     bottomPadding = bottomPad
                 )
-                OffPage.VIDEO -> VideoDownloadScreen(contentPadding = contentPadding, initialLink = pendingLink)
+                OffPage.STUDIO -> StudioScreen(
+                    contentPadding = contentPadding,
+                    selectedName = selectedName,
+                    onPickVideo = { pickVideo.launch(arrayOf("video/*")) },
+                    onSearchMusic = { page = OffPage.SEARCH }
+                )
                 OffPage.EDITOR -> OffEditorScreen(
                     contentPadding = contentPadding,
                     artwork = artwork,
@@ -748,43 +750,6 @@ private fun OffApp(initialLink: String? = null) {
                     onDelete = { showDeleteCurrent = true },
                     onDone = { page = OffPage.HOME }
                 )
-                OffPage.LIBRARY -> LibraryScreen(
-                    contentPadding = contentPadding,
-                    items = history,
-                    onOpen = { item ->
-                        runCatching {
-                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                setDataAndType(Uri.parse(item.uri), "audio/*")
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(intent)
-                        }.onFailure {
-                            scope.launch { snackbar.showSnackbar("This file can’t be opened. It may have been moved or deleted.") }
-                        }
-                    },
-                    onShare = { item ->
-                        runCatching {
-                            val intent = Intent(Intent.ACTION_SEND).apply {
-                                type = "audio/mpeg"
-                                putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(Intent.createChooser(intent, "Share audio"))
-                        }
-                    },
-                    onDelete = { showDeleteDialog = it },
-                    onOpenUri = { raw ->
-                        runCatching {
-                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                setDataAndType(Uri.parse(raw), "audio/*")
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(intent)
-                        }
-                    },
-                    onClearDownloads = { DownloadStore.clearFinished() },
-                    onDownloadTrack = { downloadTrack(it) }
-                )
                 OffPage.SETTINGS -> SettingsScreen(
                     contentPadding = contentPadding,
                     reducedMotion = reducedMotion,
@@ -823,7 +788,6 @@ private fun OffApp(initialLink: String? = null) {
                             when (page) {
                                 OffPage.HOME -> "Video downloader"
                                 OffPage.SEARCH -> "Search · Saavn + YouTube"
-                                OffPage.VIDEO -> "Download a video"
                                 OffPage.EDITOR -> "Audio editor"
                                 OffPage.TRIM -> "Trim"
                                 OffPage.SPEED -> "Playback speed"
@@ -831,7 +795,7 @@ private fun OffApp(initialLink: String? = null) {
                                 OffPage.RESET -> "Reset edits"
                                 OffPage.PROGRESS -> "Export studio"
                                 OffPage.RESULT -> "Your audio is ready"
-                                OffPage.LIBRARY -> "Library & downloads"
+                                OffPage.STUDIO -> "Audio studio"
                                 OffPage.SETTINGS -> "Preferences"
                                 else -> "Offline audio studio"
                             },
@@ -880,8 +844,7 @@ private fun OffApp(initialLink: String? = null) {
                     items = listOf(
                         NavItem("Home", Icons.Default.Home),
                         NavItem("Search", Icons.Default.Search),
-                        NavItem("Video", Icons.Default.Movie),
-                        NavItem("Library", Icons.Default.LibraryMusic)
+                        NavItem("Studio", Icons.Default.GraphicEq)
                     ),
                     selectedIndex = BOTTOM_PAGES.indexOf(page).coerceAtLeast(0),
                     onSelect = { index -> page = BOTTOM_PAGES[index] }
@@ -1009,322 +972,6 @@ private fun ResultScreen(
         OutlinedButton(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text("Back to studio") }
         Text("Delete removes this conversion and its linked saved file only.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         OutlinedButton(onClick = onDelete, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.DeleteOutline, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Delete conversion") }
-    }
-}
-
-@Composable
-private fun LibraryScreen(
-    contentPadding: PaddingValues,
-    items: List<SavedAudio>,
-    onOpen: (SavedAudio) -> Unit,
-    onShare: (SavedAudio) -> Unit,
-    onDelete: (SavedAudio) -> Unit,
-    onOpenUri: (String) -> Unit,
-    onClearDownloads: () -> Unit,
-    onDownloadTrack: (Track) -> Unit
-) {
-    val context = LocalContext.current
-    val favourites by LibraryStore.favourites.collectAsState()
-    val playlists by LibraryStore.playlists.collectAsState()
-    val downloads by DownloadStore.tasks.collectAsState()
-    val finished = downloads.filter { it.status == DownloadStatus.COMPLETED || it.status == DownloadStatus.FAILED }
-    val active = downloads.filter { DownloadStore.isActive(it.status) }
-
-    var tab by remember { mutableIntStateOf(0) }
-    var openPlaylistName by remember { mutableStateOf<String?>(null) }
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(contentPadding)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Favourites", "Playlists", "Files").forEachIndexed { index, label ->
-                BouncyChip(
-                    selected = tab == index,
-                    onClick = { tab = index; openPlaylistName = null },
-                    label = label
-                )
-            }
-        }
-
-        val openPlaylist = playlists.firstOrNull { it.name == openPlaylistName }
-        if (openPlaylist != null) {
-            PlaylistDetail(
-                playlist = openPlaylist,
-                onBack = { openPlaylistName = null },
-                onDelete = {
-                    LibraryStore.deletePlaylist(openPlaylist.name)
-                    openPlaylistName = null
-                },
-                onDownloadTrack = onDownloadTrack
-            )
-        } else when (tab) {
-            0 -> {
-                if (favourites.isEmpty()) {
-                    LibraryEmptyHint(
-                        title = "No favourites yet",
-                        body = "Tap the heart on a track in search to keep it here."
-                    )
-                } else {
-                    SectionLabel("${favourites.size} favourite${if (favourites.size == 1) "" else "s"}")
-                    favourites.forEachIndexed { index, track ->
-                        LibraryTrackCard(
-                            track = track,
-                            onPlay = { onDownloadTrack(favourites[index]) },
-                            onRemove = { LibraryStore.toggleFavourite(track) }
-                        )
-                    }
-                }
-            }
-            1 -> {
-                if (playlists.isEmpty()) {
-                    LibraryEmptyHint(
-                        title = "No playlists yet",
-                        body = "Use “Add to playlist” in the player, or the menu on any search result."
-                    )
-                } else {
-                    playlists.forEach { playlist ->
-                        Card(modifier = Modifier.fillMaxWidth().clickable { openPlaylistName = playlist.name }) {
-                            Row(
-                                Modifier.padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Surface(
-                                    shape = MaterialTheme.shapes.large,
-                                    color = MaterialTheme.colorScheme.secondaryContainer,
-                                    modifier = Modifier.size(48.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.QueueMusic,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                        modifier = Modifier.padding(12.dp)
-                                    )
-                                }
-                                Column(Modifier.weight(1f)) {
-                                    Text(playlist.name, style = MaterialTheme.typography.titleSmall)
-                                    Text(
-                                        "${playlist.tracks.size} track${if (playlist.tracks.size == 1) "" else "s"}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                IconButton(onClick = { LibraryStore.deletePlaylist(playlist.name) }) {
-                                    Icon(Icons.Default.DeleteOutline, contentDescription = "Delete playlist")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            else -> {
-                if (active.isNotEmpty()) {
-                    SectionLabel("Downloading")
-                    active.forEach { task ->
-                        DownloadRow(
-                            task = task,
-                            onOpen = {},
-                            onPauseResume = {
-                                if (task.status == DownloadStatus.PAUSED) DownloadService.resume(context)
-                                else DownloadService.pause(context)
-                            },
-                            onCancel = { DownloadService.cancel(context) }
-                        )
-                    }
-                }
-
-                if (finished.isNotEmpty()) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        SectionLabel(
-                            "${finished.size} in this session",
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedButton(onClick = onClearDownloads) { Text("Clear list") }
-                    }
-                    finished.forEach { task ->
-                        DownloadRow(
-                            task = task,
-                            onOpen = { task.savedUri?.let(onOpenUri) },
-                            onPauseResume = null,
-                            onCancel = null
-                        )
-                    }
-                    HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                }
-
-                if (items.isEmpty() && finished.isEmpty() && active.isEmpty()) {
-                    LibraryEmptyHint(
-                        title = "Your library is waiting",
-                        body = "Downloaded songs, favourites and saved conversions appear here."
-                    )
-                }
-
-                if (items.isNotEmpty()) {
-                    SectionLabel("${items.size} saved ${if (items.size == 1) "track" else "tracks"}")
-                    items.forEach { item ->
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                Modifier.padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Surface(
-                                    shape = MaterialTheme.shapes.large,
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                    modifier = Modifier.size(48.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.AudioFile,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.padding(12.dp)
-                                    )
-                                }
-                                Column(Modifier.weight(1f).clickable { onOpen(item) }) {
-                                    Text(item.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    Text(
-                                        "${formatBytes(item.bytes)} · ${java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(item.createdAt))}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                IconButton(onClick = { onShare(item) }) {
-                                    Icon(Icons.Default.Share, contentDescription = "Share ${item.name}")
-                                }
-                                IconButton(onClick = { onDelete(item) }) {
-                                    Icon(Icons.Default.DeleteOutline, contentDescription = "Delete ${item.name}")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text,
-        modifier = modifier,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-}
-
-@Composable
-private fun LibraryEmptyHint(title: String, body: String) {
-    Column(
-        Modifier.fillMaxWidth().padding(28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Icon(
-            Icons.Default.LibraryMusic,
-            contentDescription = null,
-            modifier = Modifier.size(64.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
-        Spacer(Modifier.height(16.dp))
-        Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text(
-            body,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
-    }
-}
-
-@Composable
-private fun LibraryTrackCard(
-    track: Track,
-    onPlay: () -> Unit,
-    onRemove: () -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Surface(
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                modifier = Modifier.size(48.dp)
-            ) {
-                SkeletonImage(
-                    model = track.artworkUrl,
-                    contentDescription = null,
-                    shape = MaterialTheme.shapes.large,
-                    fallback = Icons.Default.MusicNote,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-            Column(Modifier.weight(1f).clickable { onPlay() }) {
-                Text(track.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    track.artist,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            IconButton(onClick = onPlay) {
-                Icon(Icons.Default.Download, contentDescription = "Download ${track.title}")
-            }
-            IconButton(onClick = onRemove) {
-                Icon(Icons.Default.DeleteOutline, contentDescription = "Remove ${track.title}")
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlaylistDetail(
-    playlist: Playlist,
-    onBack: () -> Unit,
-    onDelete: () -> Unit,
-    onDownloadTrack: (Track) -> Unit
-) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-            Column(Modifier.weight(1f)) {
-                Text(playlist.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "${playlist.tracks.size} track${if (playlist.tracks.size == 1) "" else "s"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Button(
-                onClick = { playlist.tracks.firstOrNull()?.let { onDownloadTrack(it) } },
-                enabled = playlist.tracks.isNotEmpty()
-            ) { Text("Download all") }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.DeleteOutline, contentDescription = "Delete playlist")
-            }
-        }
-        if (playlist.tracks.isEmpty()) {
-            LibraryEmptyHint("Empty playlist", "Add tracks to it from search.")
-        } else {
-            playlist.tracks.forEachIndexed { index, track ->
-                LibraryTrackCard(
-                    track = track,
-                    onPlay = { onDownloadTrack(playlist.tracks[index]) },
-                    onRemove = { LibraryStore.removeFromPlaylist(playlist.name, track.id) }
-                )
-            }
-        }
     }
 }
 
@@ -1458,7 +1105,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 5.0.2", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 6.0.0", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "On-device video and audio downloading, plus an audio editor. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

@@ -49,6 +49,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import com.off.audioconverter.ui.components.MaterialLoadingIndicator
+import com.off.audioconverter.video.VideoFetchSection
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material.icons.filled.Pause
+import com.off.audioconverter.video.VideoDownloadService
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -86,14 +94,26 @@ private val Success = Color(0xFF9DC8A7)
 @Composable
 fun OffHomeScreen(
     contentPadding: PaddingValues,
-    onOpenLink: (String) -> Unit,
+    initialLink: String? = null,
     onOpen: (VideoDownloadTask) -> Unit,
     onEditAudio: (VideoDownloadTask) -> Unit,
     onDelete: (VideoDownloadTask) -> Unit,
     onNotice: (String) -> Unit
 ) {
     val tasks by VideoDownloadStore.tasks.collectAsState()
-    var url by remember { mutableStateOf("") }
+    var link by remember { mutableStateOf("") }
+    // The fetch lives in the section below; this is how the URL bar asks for one,
+    // and how that section reports back that it is busy.
+    var fetchRequest by remember { mutableIntStateOf(0) }
+    var fetching by remember { mutableStateOf(false) }
+
+    // A link shared into Off lands here and is fetched straight away.
+    LaunchedEffect(initialLink) {
+        if (!initialLink.isNullOrBlank()) {
+            link = initialLink
+            fetchRequest += 1
+        }
+    }
     var newestFirst by remember { mutableStateOf(true) }
     var deleteTarget by remember { mutableStateOf<VideoDownloadTask?>(null) }
     var detailTarget by remember { mutableStateOf<VideoDownloadTask?>(null) }
@@ -144,7 +164,7 @@ fun OffHomeScreen(
                     )
                     Spacer(Modifier.width(10.dp))
                     Box(Modifier.weight(1f)) {
-                        if (url.isBlank()) {
+                        if (link.isBlank()) {
                             Text(
                                 "Paste video webpage URL…",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -152,16 +172,16 @@ fun OffHomeScreen(
                             )
                         }
                         BasicTextField(
-                            value = url,
-                            onValueChange = { url = it },
+                            value = link,
+                            onValueChange = { link = it },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
                         )
                     }
-                    if (url.isNotBlank()) {
-                        IconButton(onClick = { url = "" }, modifier = Modifier.size(30.dp)) {
+                    if (link.isNotBlank()) {
+                        IconButton(onClick = { link = "" }, modifier = Modifier.size(30.dp)) {
                             Icon(
                                 Icons.Default.Cancel,
                                 contentDescription = "Clear the link",
@@ -190,24 +210,42 @@ fun OffHomeScreen(
                     )
                     Button(
                         onClick = {
-                            val text = url.trim()
-                            if (text.isBlank()) {
+                            if (link.isBlank()) {
                                 onNotice("Paste a webpage link first.")
                             } else {
-                                onOpenLink(text)
-                                url = ""
+                                fetchRequest += 1
                             }
                         },
+                        enabled = !fetching,
                         shape = RoundedCornerShape(13.dp),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
                     ) {
-                        Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(17.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Go", fontWeight = FontWeight.SemiBold)
+                        if (fetching) {
+                            // The Material Components LoadingIndicator, exactly as shipped.
+                            MaterialLoadingIndicator(color = MaterialTheme.colorScheme.onPrimary)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Reading…", fontWeight = FontWeight.SemiBold)
+                        } else {
+                            Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Go", fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
         }
+
+        // ---- what the link resolved to ----
+        // The format picker and the Download button. This used to be a page of its
+        // own, which is why pasting a link used to leave the home screen.
+        Spacer(Modifier.height(18.dp))
+        VideoFetchSection(
+            link = link,
+            fetchRequest = fetchRequest,
+            onNotice = onNotice,
+            onLoading = { fetching = it },
+            modifier = Modifier.fillMaxWidth()
+        )
 
         // ---- the downloads ----
         Spacer(Modifier.height(28.dp))
@@ -273,6 +311,13 @@ fun OffHomeScreen(
             HomeDownloadRow(
                 task = task,
                 menuOpen = false,
+                onToggle = {
+                    if (task.status == VideoDownloadStatus.PAUSED) {
+                        VideoDownloadService.resume(context, task.id)
+                    } else {
+                        VideoDownloadService.pause(context, task.id)
+                    }
+                },
                 onOpen = { onOpen(task) },
                 onDetails = { detailTarget = task },
                 onEditAudio = { onEditAudio(task) },
@@ -367,6 +412,7 @@ fun OffHomeScreen(
 private fun HomeDownloadRow(
     task: VideoDownloadTask,
     menuOpen: Boolean,
+    onToggle: () -> Unit,
     onOpen: () -> Unit,
     onDetails: () -> Unit,
     onEditAudio: () -> Unit,
@@ -392,7 +438,13 @@ private fun HomeDownloadRow(
                         .width(118.dp)
                         .aspectRatio(16f / 10f)
                         .clip(RoundedCornerShape(13.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .pointerInput(task.id, active, paused) {
+                            detectTapGestures(
+                                onTap = { if (active) onToggle() },
+                                onLongPress = { open = true }
+                            )
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     SkeletonImage(
@@ -402,6 +454,21 @@ private fun HomeDownloadRow(
                         fallback = if (isAudio) Icons.Default.MusicNote else Icons.Default.PlayCircle,
                         modifier = Modifier.fillMaxSize()
                     )
+                    if (active) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.45f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                if (paused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                contentDescription = if (paused) "Resume download" else "Pause download",
+                                tint = Color.White,
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+                    }
                     if (task.durationSec > 0) {
                         Box(
                             Modifier
@@ -490,6 +557,19 @@ private fun HomeDownloadRow(
                         onDismissRequest = { open = false },
                         modifier = Modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest)
                     ) {
+                        if (active) {
+                            DropdownMenuItem(
+                                text = { Text(if (paused) "Resume" else "Pause", color = MaterialTheme.colorScheme.onSurface) },
+                                leadingIcon = {
+                                    Icon(
+                                        if (paused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                },
+                                onClick = { open = false; onToggle() }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Play", color = MaterialTheme.colorScheme.onSurface) },
                             leadingIcon = {

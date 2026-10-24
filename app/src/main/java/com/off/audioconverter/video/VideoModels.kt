@@ -13,7 +13,9 @@ data class VideoQuality(
     val mimeType: String,
     val sizeBytes: Long? = null,
     /** Set when this rendition comes from yt-dlp: the format selector to hand it. */
-    val ytDlpSelector: String? = null
+    val ytDlpSelector: String? = null,
+    /** A photo post rather than a video: saved to Pictures/Off instead of Movies/Off. */
+    val isImage: Boolean = false
 )
 
 /** An audio-only download: the source audio, optionally re-encoded to MP3. */
@@ -55,7 +57,9 @@ data class DownloadSelection(
     /** The page the user pasted — yt-dlp downloads from this, not from a stream URL. */
     val pageUrl: String? = null,
     /** When set, the download runs through yt-dlp with this format selector. */
-    val ytDlpSelector: String? = null
+    val ytDlpSelector: String? = null,
+    /** A photo post: saved to Pictures/Off. */
+    val isImage: Boolean = false
 ) {
     val isAudio: Boolean get() = outputFormat == "mp3" || outputFormat == "m4a"
 }

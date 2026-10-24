@@ -310,3 +310,19 @@ catch-all for every site they cannot read.
   same Settings button — so the screen opened with two titles and two gears.
 - The home screen's header row is gone. Its information moved to the top bar, which now reads
   **"Off · Video downloader"** on the home page, so nothing was lost.
+
+## v6.0.0 — Home does everything, Studio returns, photos download too
+- **A pasted link no longer leaves Home.** The fetched card (16:9 thumbnail, description, the
+  Video/Audio picker, the quality chips and Download) moved out of the Video page and into the home
+  screen, below the URL bar. `VideoDownloadScreen` became `VideoFetchSection`, which the home screen
+  drives: it owns the URL bar and asks for a fetch. A link shared into Off now lands on Home too.
+- **The Video and Library pages are gone**, along with their navigation buttons and the
+  `LibraryScreen`, `PlaylistDetail`, `LibraryTrackCard`, `SectionLabel` and `LibraryEmptyHint`
+  composables.
+- **Studio is the third tab**, holding the audio tools the home screen used to have: "Make audio your
+  own." with Search music and Convert a video, and a workspace row for the Audio editor and Music
+  search.
+- **Photo links download.** yt-dlp reports image posts as formats with neither a video nor an audio
+  stream; those now become "Photo" entries in the picker and are saved to **Pictures/Off** with the
+  right image MIME type.
+- The download rows on Home keep the pause/resume-on-the-thumbnail behaviour and the progress bar.

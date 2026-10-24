@@ -96,14 +96,16 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 /**
- * Download a video — or just its audio — by pasting a link. Resolution goes
- * through NewPipe Extractor first and the Piped API second, so "any video" means
- * any link that either backend can read.
+ * The fetched card: whatever the link resolved to, the format picker and the
+ * Download button. The home screen owns the URL bar and asks for the fetch, so
+ * this stays a plain section that can be dropped in anywhere.
  */
 @Composable
-fun VideoDownloadScreen(
-    contentPadding: PaddingValues,
-    initialLink: String? = null,
+fun VideoFetchSection(
+    link: String,
+    fetchRequest: Int,
+    onNotice: (String) -> Unit,
+    onLoading: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -111,7 +113,6 @@ fun VideoDownloadScreen(
     val repository = remember { VideoRepository(context) }
     val downloads by VideoDownloadStore.tasks.collectAsState()
 
-    var link by remember { mutableStateOf(initialLink.orEmpty()) }
     var info by remember { mutableStateOf<VideoInfo?>(null) }
     var mode by remember { mutableIntStateOf(0) }          // 0 = video, 1 = audio
     var quality by remember { mutableStateOf<VideoQuality?>(null) }
@@ -147,13 +148,18 @@ fun VideoDownloadScreen(
         label = "video-info-fade"
     )
 
-    // A link shared into Off is fetched straight away.
-    LaunchedEffect(initialLink) {
-        if (!initialLink.isNullOrBlank()) {
-            link = initialLink
-            fetch()
-        }
+    // The home screen asks for a fetch by bumping the counter, so it owns the URL
+    // bar and this stays a pure fetch-and-pick section.
+    LaunchedEffect(fetchRequest) {
+        if (fetchRequest > 0) fetch()
     }
+
+    // Messages go up to the app snackbar rather than a second strip on screen.
+    LaunchedEffect(notice) {
+        notice?.let { onNotice(it); notice = null }
+    }
+
+    LaunchedEffect(loading) { onLoading(loading) }
 
     val selection: DownloadSelection? = if (mode == 0) {
         quality?.let {
@@ -162,9 +168,14 @@ fun VideoDownloadScreen(
                 videoUrl = it.videoUrl,
                 audioUrl = it.audioUrl,
                 sourceMime = it.mimeType,
-                outputFormat = if (it.mimeType.contains("webm")) "webm" else "mp4",
+                outputFormat = when {
+                    it.isImage -> it.mimeType.substringAfterLast('/')
+                    it.mimeType.contains("webm") -> "webm"
+                    else -> "mp4"
+                },
                 pageUrl = link.trim(),
-                ytDlpSelector = it.ytDlpSelector
+                ytDlpSelector = it.ytDlpSelector,
+                isImage = it.isImage
             )
         }
     } else {
@@ -186,48 +197,9 @@ fun VideoDownloadScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(contentPadding)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        OutlinedTextField(
-            value = link,
-            onValueChange = { link = it },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            placeholder = { Text("https://youtube.com/watch?v=…") },
-            leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
-            trailingIcon = {
-                if (link.isNotEmpty()) {
-                    IconButton(onClick = { link = ""; info = null }) {
-                        Icon(Icons.Default.Close, contentDescription = "Clear link")
-                    }
-                }
-            },
-            shape = RoundedCornerShape(22.dp),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-            keyboardActions = KeyboardActions(onGo = { fetch() }),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer
-            )
-        )
-
-        Button(
-            onClick = { fetch() },
-            enabled = !loading && link.isNotBlank(),
-            modifier = Modifier.fillMaxWidth().height(52.dp)
-        ) {
-            if (loading) {
-                // The Material Components LoadingIndicator, exactly as shipped.
-                MaterialLoadingIndicator(color = MaterialTheme.colorScheme.onPrimary)
-            } else {
-                Icon(Icons.Default.Download, contentDescription = null)
-            }
-            Spacer(Modifier.width(10.dp))
-            Text(if (loading) "Reading the link…" else "Fetch video")
-        }
-
         if (loading && info == null) {
             VideoInfoSkeleton()
         }
@@ -362,10 +334,10 @@ fun VideoDownloadScreen(
                                     }
                                     quality?.let { option ->
                                         Text(
-                                            if (option.muxed) {
-                                                "This rendition already contains audio — saved straight out."
-                                            } else {
-                                                "Video and audio arrive separately and are joined with FFmpeg after download."
+                                            when {
+                                                option.isImage -> "Saved to Pictures/Off as a photo."
+                                                option.muxed -> "This rendition already contains audio — saved straight out."
+                                                else -> "Video and audio arrive separately and are joined with FFmpeg after download."
                                             },
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -428,70 +400,6 @@ fun VideoDownloadScreen(
                             )
                         }
                     }
-                }
-            }
-        }
-
-        if (downloads.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "Downloads",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedButton(onClick = { VideoDownloadStore.clearFinished() }) { Text("Clear finished") }
-            }
-            downloads.forEach { task ->
-                key(task.id) {
-                    AnimatedVisibility(
-                        visible = true,
-                        enter = fadeIn(tween(260)) + expandVertically(tween(340)),
-                        label = "download-item"
-                    ) {
-                        DownloadRow(
-                            task = task,
-                            onToggle = {
-                                if (task.status == VideoDownloadStatus.PAUSED) {
-                                    VideoDownloadService.resume(context, task.id)
-                                } else {
-                                    VideoDownloadService.pause(context, task.id)
-                                }
-                            },
-                            onDelete = { VideoDownloadService.delete(context, task.id) },
-                            onOpen = {
-                                val saved = task.savedUri
-                                val isAudio = task.label.contains("MP3", true) ||
-                                    task.label.contains("M4A", true)
-                                if (saved != null) {
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(Uri.parse(saved), if (isAudio) "audio/*" else "video/*")
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    runCatching { context.startActivity(intent) }
-                                        .onFailure { notice = "No app on this phone can open that file." }
-                                } else {
-                                    notice = "That file has not been saved yet."
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        notice?.let { message ->
-            Surface(
-                Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(message, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = { notice = null }) { Text("OK") }
                 }
             }
         }

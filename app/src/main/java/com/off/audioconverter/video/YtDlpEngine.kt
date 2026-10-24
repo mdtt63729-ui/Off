@@ -138,6 +138,17 @@ object YtDlpEngine {
         val abr: Double
     )
 
+    private fun mimeForImage(ext: String): String = when (ext.lowercase()) {
+        "png" -> "image/png"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "avif" -> "image/avif"
+        "heic" -> "image/heic"
+        else -> "image/jpeg"
+    }
+
+    private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "gif", "avif", "heic")
+
     private fun mimeFor(ext: String): String = when (ext.lowercase()) {
         "webm" -> "video/webm"
         "mkv" -> "video/x-matroska"
@@ -176,9 +187,25 @@ object YtDlpEngine {
 
         val videos = formats.filter { it.hasVideo }
         val audios = formats.filter { !it.hasVideo && it.hasAudio }
+        // Instagram and friends also serve photo posts; those arrive as plain image
+        // formats with neither a video nor an audio stream.
+        val images = formats.filter { !it.hasVideo && !it.hasAudio && it.ext.lowercase() in IMAGE_EXTENSIONS }
         val bestAudio = audios.maxByOrNull { it.abr } ?: audios.maxByOrNull { it.size }
 
         val qualities = ArrayList<VideoQuality>()
+        images.forEachIndexed { index, image ->
+            qualities += VideoQuality(
+                label = if (images.size == 1) "Photo" else "Photo ${index + 1}",
+                height = 0,
+                muxed = true,
+                videoUrl = null,
+                audioUrl = null,
+                mimeType = mimeForImage(image.ext),
+                sizeBytes = image.size.takeIf { it > 0 },
+                ytDlpSelector = image.id,
+                isImage = true
+            )
+        }
         val heights = videos.map { it.height }.filter { it > 0 }.distinct().sortedDescending()
         for (height in heights) {
             val atHeight = videos.filter { it.height == height }
