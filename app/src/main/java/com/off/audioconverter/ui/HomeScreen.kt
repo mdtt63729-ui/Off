@@ -57,6 +57,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.filled.Pause
 import com.off.audioconverter.video.VideoDownloadService
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -100,6 +101,7 @@ fun OffHomeScreen(
     onDelete: (VideoDownloadTask) -> Unit,
     onNotice: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val tasks by VideoDownloadStore.tasks.collectAsState()
     var link by remember { mutableStateOf("") }
     // The fetch lives in the section below; this is how the URL bar asks for one,
@@ -422,6 +424,7 @@ private fun HomeDownloadRow(
     val done = task.status == VideoDownloadStatus.COMPLETED
     val failed = task.status == VideoDownloadStatus.FAILED
     val active = VideoDownloadStore.isActive(task.status)
+    val paused = task.status == VideoDownloadStatus.PAUSED
     val isAudio = task.label.contains("MP3", ignoreCase = true) ||
         task.label.contains("M4A", ignoreCase = true)
 
