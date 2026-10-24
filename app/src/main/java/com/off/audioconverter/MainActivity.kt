@@ -642,7 +642,8 @@ private fun OffApp(initialLink: String? = null) {
                     onNotice = { message -> scope.launch { snackbar.showSnackbar(message) } }
                 )
                 OffPage.SEARCH -> MusicSearchScreen(
-                    modifier = Modifier.padding(contentPadding)
+                    topPadding = topPad,
+                    bottomPadding = bottomPad
                 )
                 OffPage.VIDEO -> VideoDownloadScreen(contentPadding = contentPadding, initialLink = pendingLink)
                 OffPage.EDITOR -> OffEditorScreen(
@@ -1457,7 +1458,7 @@ private fun SettingsScreen(contentPadding: PaddingValues, reducedMotion: Boolean
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("About Off", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Version 5.0.0", style = MaterialTheme.typography.bodyLarge)
+                Text("Version 5.0.1", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "On-device video and audio downloading, plus an audio editor. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodyMedium,

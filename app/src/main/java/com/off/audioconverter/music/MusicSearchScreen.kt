@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -72,6 +73,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.off.audioconverter.download.DownloadService
@@ -94,7 +96,11 @@ import java.util.UUID
  * into a single list, led by a "top result" card, with recent searches when idle.
  */
 @Composable
-fun MusicSearchScreen(modifier: Modifier = Modifier) {
+fun MusicSearchScreen(
+    topPadding: Dp = 0.dp,
+    bottomPadding: Dp = 0.dp,
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { MusicRepository() }
@@ -153,8 +159,12 @@ fun MusicSearchScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    // Only the top inset is applied to the screen. The bottom one is given to the
+    // list itself as content padding, so the results run to the bottom of the
+    // display and scroll under the floating navigation bar instead of stopping
+    // short of it and leaving a dead band.
     Column(
-        modifier = modifier.fillMaxSize().padding(horizontal = 16.dp),
+        modifier = modifier.fillMaxSize().padding(horizontal = 16.dp).padding(top = topPadding),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         OutlinedTextField(
@@ -216,6 +226,7 @@ fun MusicSearchScreen(modifier: Modifier = Modifier) {
                     val top = allTracks.first()
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(bottom = bottomPadding + 16.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
                         item(key = "top") {
@@ -257,7 +268,7 @@ fun MusicSearchScreen(modifier: Modifier = Modifier) {
 
         notice?.let { message ->
             Surface(
-                Modifier.fillMaxWidth(),
+                Modifier.fillMaxWidth().padding(bottom = bottomPadding),
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh
             ) {

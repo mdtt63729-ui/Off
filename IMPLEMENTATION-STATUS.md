@@ -291,3 +291,15 @@ catch-all for every site they cannot read.
 - The navigation bar's first tab is now labelled **Home** instead of Studio.
 
 - `AddToPlaylistDialog` moved out of the deleted player package into `library/`, since playlists are a library feature.
+
+## v5.0.1 — the search list runs to the bottom of the screen
+- The search screen was inset by the whole bottom padding, and its results live in a bounded
+  `LazyColumn` (`Modifier.weight(1f)`). That combination left a **fixed dead band** between the end
+  of the list and the navigation bar, with the last row cut off in the middle of its card — it read
+  as an opaque slab sitting over the content.
+- Now only the **top** inset is applied to the screen. The bottom inset is handed to the list as
+  `contentPadding`, so the results run to the bottom of the display and scroll **under** the floating
+  navigation bar, and the last row can still be scrolled clear of it. The band is gone.
+- The search notice is padded so it does not sit behind the bar either.
+- The other screens were already scrollable columns, where a bottom inset is part of the scroll and
+  does not create a band, so they are unchanged.
