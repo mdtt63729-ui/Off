@@ -26,3 +26,13 @@
 # Keep the entry points the manifest refers to.
 -keep class com.off.audioconverter.MainActivity { *; }
 -keep class com.off.audioconverter.video.VideoDownloadService { *; }
+
+# Rhino, the JavaScript engine inside NewPipe Extractor, references the JDK's
+# dynalink package. Android has no such package, and R8 refuses to finish while
+# those references are unresolved. They are never reached on device.
+-dontwarn jdk.dynalink.**
+-dontwarn java.lang.invoke.**
+-dontwarn javax.script.**
+-dontwarn org.mozilla.javascript.**
+-dontwarn org.mozilla.classfile.**
+-dontwarn java.beans.**
