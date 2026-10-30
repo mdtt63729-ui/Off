@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -85,6 +86,7 @@ class MainActivity : ComponentActivity() {
  * There is no navigation any more — no tabs, no player, no editor. The only other
  * surface is the settings sheet behind the gear, which holds the error log.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OffApp(initialLink: String?) {
     val context = LocalContext.current
@@ -169,6 +171,7 @@ private fun OffApp(initialLink: String?) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsSheet(onDismiss: () -> Unit) {
     val context = LocalContext.current
