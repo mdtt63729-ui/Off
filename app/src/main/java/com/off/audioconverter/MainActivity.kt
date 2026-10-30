@@ -2,6 +2,7 @@ package com.off.audioconverter
 
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -69,7 +70,22 @@ class MainActivity : ComponentActivity() {
         CrashLog.install(applicationContext)
         sharedLink.value = linkFrom(intent)
         addOnNewIntentListener { sharedLink.value = linkFrom(it) }
-        setContent { OffTheme { OffApp(initialLink = sharedLink.value) } }
+        setContent {
+            OffTheme {
+                var failure by remember { mutableStateOf<Throwable?>(null) }
+                val caught = failure
+                if (caught == null) {
+                    try {
+                        OffApp(initialLink = sharedLink.value)
+                    } catch (t: Throwable) {
+                        CrashLog.record(applicationContext, "Could not draw the screen", t)
+                        failure = t
+                    }
+                } else {
+                    CrashReport(caught)
+                }
+            }
+        }
     }
 
     /** Pulls the first http(s) URL out of a shared message. */
@@ -77,6 +93,35 @@ class MainActivity : ComponentActivity() {
         if (intent?.action != Intent.ACTION_SEND) return null
         val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
         return Regex("https?://\\S+").find(text)?.value
+    }
+}
+
+/** Shown when the screen itself fails, so the reason is readable instead of lost. */
+@Composable
+private fun CrashReport(error: Throwable) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp)
+    ) {
+        Text(
+            "Off could not draw its screen",
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.error
+        )
+        Text(
+            "This text is what I need to fix it. Please screenshot it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp, bottom = 14.dp)
+        )
+        Text(
+            android.util.Log.getStackTraceString(error),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }
 
@@ -186,7 +231,7 @@ private fun SettingsSheet(onDismiss: () -> Unit) {
                 Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)
             ) {
-                Text("Version 7.0.0", color = MaterialTheme.colorScheme.onSurface)
+                Text("Version 7.0.1", color = MaterialTheme.colorScheme.onSurface)
                 Text(
                     "On-device video and photo downloading. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodySmall,

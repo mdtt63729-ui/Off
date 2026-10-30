@@ -36,3 +36,11 @@
 -dontwarn org.mozilla.javascript.**
 -dontwarn org.mozilla.classfile.**
 -dontwarn java.beans.**
+
+# Shrinking is what makes the app small, but obfuscation is what makes R8 risky:
+# it renames anything reached by reflection, and a renamed class shows up as a
+# NoClassDefFoundError at startup. Off gains little from renaming, so it is off.
+-dontobfuscate
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod,MethodParameters,SourceFile,LineNumberTable
+# Off's own code is small; keeping it whole removes a whole class of surprises.
+-keep class com.off.audioconverter.** { *; }
