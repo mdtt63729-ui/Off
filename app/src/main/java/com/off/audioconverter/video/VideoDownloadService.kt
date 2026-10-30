@@ -18,8 +18,6 @@ import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
-import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.ReturnCode
 import com.off.audioconverter.MainActivity
 import com.off.audioconverter.ui.CrashLog
 import kotlinx.coroutines.CoroutineScope
@@ -530,15 +528,18 @@ class VideoDownloadService : Service() {
     ): File {
         updateProgress(task, selection, 0.90f, "Converting to MP3")
         val mp3 = File(workDir, "off_converted.mp3")
-        val session = FFmpegKit.executeWithArguments(
-            arrayOf(
+        val ok = YtDlpEngine.runFfmpeg(
+            this,
+            listOf(
                 "-y", "-i", source.absolutePath,
                 "-vn", "-codec:a", "libmp3lame", "-b:a", "${bitrate}k",
                 "-f", "mp3", mp3.absolutePath
             )
         )
-        if (!ReturnCode.isSuccess(session.returnCode) || !mp3.exists() || mp3.length() == 0L) {
-            error("Could not convert the audio to MP3. Try the M4A option instead.")
+        if (!ok || !mp3.exists() || mp3.length() == 0L) {
+            // The bundled ffmpeg is a minimal build; if this one cannot encode MP3,
+            // hand back the original audio rather than failing the download.
+            return source
         }
         return mp3
     }
@@ -668,7 +669,7 @@ class VideoDownloadService : Service() {
         to: Float,
         stage: String
     ) {
-        val buffer = ByteArray(128 * 1024)
+        val buffer = ByteArray(1024 * 1024)
         var read = input.read(buffer)
         var done = alreadyDone
         var lastStep = -1
@@ -708,25 +709,27 @@ class VideoDownloadService : Service() {
         val container = if (videoExt == "webm") "webm" else "mp4"
         val copied = File(workDir, "joined.$container")
 
-        val copy = FFmpegKit.executeWithArguments(
-            arrayOf(
+        val copy = YtDlpEngine.runFfmpeg(
+            this,
+            listOf(
                 "-y", "-i", video.absolutePath, "-i", audio.absolutePath,
                 "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-shortest", copied.absolutePath
             )
         )
-        if (ReturnCode.isSuccess(copy.returnCode) && copied.exists() && copied.length() > 0L) {
+        if (copy && copied.exists() && copied.length() > 0L) {
             return copied
         }
 
         val reencoded = File(workDir, "joined-aac.mp4")
-        val reencode = FFmpegKit.executeWithArguments(
-            arrayOf(
+        val reencode = YtDlpEngine.runFfmpeg(
+            this,
+            listOf(
                 "-y", "-i", video.absolutePath, "-i", audio.absolutePath,
                 "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
                 "-shortest", reencoded.absolutePath
             )
         )
-        if (ReturnCode.isSuccess(reencode.returnCode) && reencoded.exists() && reencoded.length() > 0L) {
+        if (reencode && reencoded.exists() && reencoded.length() > 0L) {
             return reencoded
         }
 

@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
@@ -97,7 +96,6 @@ fun OffHomeScreen(
     contentPadding: PaddingValues,
     initialLink: String? = null,
     onOpen: (VideoDownloadTask) -> Unit,
-    onEditAudio: (VideoDownloadTask) -> Unit,
     onDelete: (VideoDownloadTask) -> Unit,
     onNotice: (String) -> Unit
 ) {
@@ -322,7 +320,6 @@ fun OffHomeScreen(
                 },
                 onOpen = { onOpen(task) },
                 onDetails = { detailTarget = task },
-                onEditAudio = { onEditAudio(task) },
                 onDelete = { deleteTarget = task }
             )
             Spacer(Modifier.height(10.dp))
@@ -417,7 +414,6 @@ private fun HomeDownloadRow(
     onToggle: () -> Unit,
     onOpen: () -> Unit,
     onDetails: () -> Unit,
-    onEditAudio: () -> Unit,
     onDelete: () -> Unit
 ) {
     var open by remember { mutableStateOf(menuOpen) }
@@ -587,14 +583,6 @@ private fun HomeDownloadRow(
                                 Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary)
                             },
                             onClick = { open = false; onDetails() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Edit audio", color = MaterialTheme.colorScheme.onSurface) },
-                            leadingIcon = {
-                                Icon(Icons.Default.GraphicEq, null, tint = MaterialTheme.colorScheme.primary)
-                            },
-                            enabled = done,
-                            onClick = { open = false; onEditAudio() }
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                         DropdownMenuItem(

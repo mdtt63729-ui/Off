@@ -10,6 +10,7 @@ All entry points return a JSON string so the Kotlin side never has to deal with
 Python objects.
 """
 import json
+import time
 import os
 import re
 import shutil
@@ -76,8 +77,21 @@ def _progress_file(job_id):
     return os.path.join(tempfile.gettempdir(), "off_dl_progress_" + str(job_id) + ".json")
 
 
-def _write_progress(job_id, payload):
+# yt-dlp calls the progress hook for every chunk it reads. Writing a JSON file
+# that often was throttling the download to a crawl, so writes are rate-limited;
+# anything important (finished, error, cancelled) still goes through immediately.
+_PROGRESS_MIN_INTERVAL = 0.4
+_last_progress_write = {}
+
+
+def _write_progress(job_id, payload, force=False):
     try:
+        now = time.time()
+        final = payload.get("status") in ("finished", "error", "cancelled", "starting")
+        if not force and not final:
+            if now - _last_progress_write.get(job_id, 0.0) < _PROGRESS_MIN_INTERVAL:
+                return
+        _last_progress_write[job_id] = now
         path = _progress_file(job_id)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -190,8 +204,12 @@ def start_download(url, format_selector, output_dir, job_id):
         "format": selector,
         "outtmpl": output_template,
         "progress_hooks": [_progress_hook(job_id)],
-        "retries": 3,
-        "fragment_retries": 3,
+        # Speed: pull fragmented streams in parallel and read in large chunks.
+        "concurrent_fragment_downloads": 8,
+        "http_chunk_size": 10485760,
+        "buffersize": 1048576,
+        "retries": 10,
+        "fragment_retries": 10,
         "continuedl": True,
         "overwrites": False,
         "socket_timeout": 20,

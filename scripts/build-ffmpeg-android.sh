@@ -22,6 +22,30 @@ API=${API:-24}
 TC="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
 CC="$TC/bin/aarch64-linux-android${API}-clang"
 
+# ---- libmp3lame ----
+# So the one bundled binary can also encode MP3 (Off's audio option). Shipping
+# FFmpegKit for that alone cost about 13 MB of the download.
+LAME_VERSION=${LAME_VERSION:-3.100}
+LAME_PREFIX=${LAME_PREFIX:-/tmp/lame-android}
+if [ ! -f "$LAME_PREFIX/lib/libmp3lame.a" ]; then
+  echo "building libmp3lame $LAME_VERSION for arm64"
+  curl -sSL -o /tmp/lame.tar.gz \
+    "https://downloads.sourceforge.net/project/lame/lame/${LAME_VERSION}/lame-${LAME_VERSION}.tar.gz"
+  rm -rf /tmp/lame-src && mkdir -p /tmp/lame-src "$LAME_PREFIX"
+  tar -xzf /tmp/lame.tar.gz -C /tmp/lame-src --strip-components=1
+  (
+    cd /tmp/lame-src
+    ./configure \
+      --host=aarch64-linux-android \
+      --prefix="$LAME_PREFIX" \
+      --disable-shared --enable-static --disable-frontend --disable-decoder \
+      CC="$CC" AR="$TC/bin/llvm-ar" RANLIB="$TC/bin/llvm-ranlib" \
+      CFLAGS="-Os"
+    make -j"$(nproc)"
+    make install
+  )
+fi
+
 cd "$FFMPEG_SRC"
 
 ./configure \
@@ -41,11 +65,13 @@ cd "$FFMPEG_SRC"
   --enable-muxer=mp4,mov,matroska,webm,ipod,mp3,adts,ogg,opus,image2,mjpeg,wav \
   --enable-parser=aac,h264,hevc,vp9,av1,opus,vorbis,mpeg4video,mjpeg,flac \
   --enable-decoder=aac,h264,hevc,vp9,av1,mp3,opus,vorbis,flac,mjpeg,pcm_s16le \
-  --enable-encoder=aac,mjpeg,pcm_s16le \
+  --enable-encoder=aac,mjpeg,pcm_s16le,libmp3lame \
+  --enable-libmp3lame \
   --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb,extract_extradata,vp9_superframe \
   --enable-protocol=file,pipe,data,concat,crypto \
   --enable-swresample --enable-swscale \
-  --extra-cflags="-Os"
+  --extra-cflags="-Os -I$LAME_PREFIX/include" \
+  --extra-ldflags="-L$LAME_PREFIX/lib"
 
 make -j"$(nproc)"
 "$TC/bin/llvm-strip" ffmpeg ffprobe

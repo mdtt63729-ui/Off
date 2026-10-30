@@ -121,6 +121,26 @@ object YtDlpEngine {
         )
     }
 
+    /**
+     * Runs the ffmpeg bundled with the app and waits for it.
+     *
+     * This replaces FFmpegKit. The app already ships one minimal ffmpeg binary
+     * because yt-dlp needs it to merge, so reusing that binary instead of adding
+     * a second, much larger copy of FFmpeg saves about 13 MB of the download.
+     */
+    fun runFfmpeg(context: Context, args: List<String>): Boolean {
+        val binary = File(File(context.filesDir, "ffmpeg"), "ffmpeg")
+        if (!binary.exists()) prepare(context)
+        if (!binary.exists()) return false
+        return runCatching {
+            val process = ProcessBuilder(listOf(binary.absolutePath) + args)
+                .redirectErrorStream(true)
+                .start()
+            process.inputStream.bufferedReader().use { it.readText() }
+            process.waitFor() == 0
+        }.getOrDefault(false)
+    }
+
     fun cleanup(context: Context, jobId: String) {
         if (!started) return
         runCatching { bridge(context).callAttr("cleanup_progress", jobId) }

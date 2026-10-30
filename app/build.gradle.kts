@@ -14,8 +14,8 @@ android {
         applicationId = "com.off.audioconverter"
         minSdk = 26
         targetSdk = 35
-        versionCode = 28
-        versionName = "6.0.1"
+        versionCode = 29
+        versionName = "7.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         // Chaquopy builds a Python runtime per ABI, and the bundled ffmpeg is
@@ -25,7 +25,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 is what takes the code from ~15 MB down to a few, and it also
+            // shrinks the icon library to the icons actually referenced.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -91,20 +94,13 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.navigation:navigation-compose:2.8.5")
     implementation("io.coil-kt:coil-compose:2.7.0")
 
     // Material Components: provides the M3 Expressive LoadingIndicator view.
     implementation("com.google.android.material:material:1.13.0")
 
-    // Media3 / ExoPlayer: background playback, media session, mini + full player.
-    implementation("androidx.media3:media3-exoplayer:1.5.1")
-
     // YouTube search + audio stream resolution (drop-in for the retired extractor).
     implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.3")
-
-    // Maintained LGPL FFmpegKit fork; includes libmp3lame for MP3 encoding.
-    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.9")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.4")
 
