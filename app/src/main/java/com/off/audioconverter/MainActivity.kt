@@ -72,17 +72,20 @@ class MainActivity : ComponentActivity() {
         addOnNewIntentListener { sharedLink.value = linkFrom(it) }
         setContent {
             OffTheme {
-                var failure by remember { mutableStateOf<Throwable?>(null) }
-                val caught = failure
-                if (caught == null) {
-                    try {
-                        OffApp(initialLink = sharedLink.value)
-                    } catch (t: Throwable) {
-                        CrashLog.record(applicationContext, "Could not draw the screen", t)
-                        failure = t
-                    }
+                // If the previous launch was killed before it could draw anything,
+                // show what killed it rather than repeating the crash silently.
+                var report by remember { mutableStateOf(CrashLog.readUncaught(applicationContext)) }
+                val shown = report
+                if (shown != null) {
+                    CrashReport(
+                        text = shown,
+                        onDismiss = {
+                            CrashLog.clearUncaught(applicationContext)
+                            report = null
+                        }
+                    )
                 } else {
-                    CrashReport(caught)
+                    OffApp(initialLink = sharedLink.value)
                 }
             }
         }
@@ -96,9 +99,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** Shown when the screen itself fails, so the reason is readable instead of lost. */
+/** Shown when the last launch was killed, so the reason is readable instead of lost. */
 @Composable
-private fun CrashReport(error: Throwable) {
+private fun CrashReport(text: String, onDismiss: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
@@ -118,10 +121,13 @@ private fun CrashReport(error: Throwable) {
             modifier = Modifier.padding(top = 6.dp, bottom = 14.dp)
         )
         Text(
-            android.util.Log.getStackTraceString(error),
+            text,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface
         )
+        TextButton(onClick = onDismiss, modifier = Modifier.padding(top = 16.dp)) {
+            Text("Continue to Off")
+        }
     }
 }
 

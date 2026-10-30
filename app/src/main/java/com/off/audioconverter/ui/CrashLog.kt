@@ -18,6 +18,7 @@ import java.util.Locale
 object CrashLog {
 
     private const val FILE_NAME = "off-last-error.txt"
+    private const val UNCAUGHT_NAME = "off-last-crash.txt"
     private const val MAX_CHARS = 8000
 
     @Volatile private var installed = false
@@ -32,6 +33,13 @@ object CrashLog {
             val previous = Thread.getDefaultUncaughtExceptionHandler()
             Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
                 write(app, "Uncaught exception on ${thread.name}", throwable)
+                // A crash during the first draw leaves nothing on screen to read, so
+                // the trace is also left here for the next launch to show.
+                runCatching {
+                    val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+                    File(app.filesDir, UNCAUGHT_NAME)
+                        .writeText("Off crashed at $stamp on ${thread.name}\n\n" + Log.getStackTraceString(throwable))
+                }
                 previous?.uncaughtException(thread, throwable)
             }
         }
@@ -63,6 +71,17 @@ object CrashLog {
             val file = File(context.applicationContext.filesDir, FILE_NAME)
             if (file.exists()) file.readText().takeIf { it.isNotBlank() } else null
         }.getOrNull()
+
+    /** The trace of the last crash that killed the app, if any. */
+    fun readUncaught(context: Context): String? =
+        runCatching {
+            val file = File(context.applicationContext.filesDir, UNCAUGHT_NAME)
+            if (file.exists()) file.readText().takeIf { it.isNotBlank() } else null
+        }.getOrNull()
+
+    fun clearUncaught(context: Context) {
+        runCatching { File(context.applicationContext.filesDir, UNCAUGHT_NAME).delete() }
+    }
 
     fun clear(context: Context) {
         runCatching { File(context.applicationContext.filesDir, FILE_NAME).delete() }
