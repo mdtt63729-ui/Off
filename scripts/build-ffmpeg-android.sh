@@ -61,15 +61,15 @@ cd "$FFMPEG_SRC"
   --disable-avdevice --disable-postproc --disable-network \
   --enable-ffmpeg --enable-ffprobe --disable-ffplay \
   --disable-everything \
-  --enable-demuxer=mov,matroska,mp3,ogg,aac,mpegts,hls,image2,mjpeg,wav \
-  --enable-muxer=mp4,mov,matroska,webm,ipod,mp3,adts,ogg,opus,image2,mjpeg,wav \
-  --enable-parser=aac,h264,hevc,vp9,av1,opus,vorbis,mpeg4video,mjpeg,flac \
-  --enable-decoder=aac,h264,hevc,vp9,av1,mp3,opus,vorbis,flac,mjpeg,pcm_s16le \
-  --enable-encoder=aac,mjpeg,pcm_s16le,libmp3lame \
+  --enable-demuxer=mov,matroska,mp3,ogg,aac,mpegts,hls,wav \
+  --enable-muxer=mp4,mov,matroska,webm,ipod,mp3,adts,wav \
+  --enable-parser=aac,opus,vorbis,mpeg4video \
+  --enable-decoder=aac,mp3,opus,vorbis,pcm_s16le \
+  --enable-encoder=libmp3lame \
   --enable-libmp3lame \
-  --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb,extract_extradata,vp9_superframe \
+  --enable-bsf=aac_adtstoasc,extract_extradata \
   --enable-protocol=file,pipe,data,concat,crypto \
-  --enable-swresample --enable-swscale \
+  --enable-swresample \
   --extra-cflags="-Os -I$LAME_PREFIX/include" \
   --extra-ldflags="-L$LAME_PREFIX/lib"
 
