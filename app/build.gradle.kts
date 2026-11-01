@@ -14,8 +14,8 @@ android {
         applicationId = "com.off.audioconverter"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        versionName = "7.0.1"
+        versionCode = 31
+        versionName = "7.0.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         // Chaquopy builds a Python runtime per ABI, and the bundled ffmpeg is

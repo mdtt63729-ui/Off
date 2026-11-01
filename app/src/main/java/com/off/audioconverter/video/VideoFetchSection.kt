@@ -41,11 +41,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
@@ -193,11 +191,13 @@ fun VideoFetchSection(
         }
     }
 
+    // This section lives inside the home screen's own vertical scroll, so it must
+    // not scroll itself: a nested verticalScroll is measured with an unbounded
+    // height and throws "Vertically scrollable component was measured with an
+    // infinity maximum height constraints" on the very first frame, which killed
+    // the app on every launch. It is a plain column in the parent's scroll now.
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (loading && info == null) {

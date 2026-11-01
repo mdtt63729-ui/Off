@@ -237,7 +237,7 @@ private fun SettingsSheet(onDismiss: () -> Unit) {
                 Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)
             ) {
-                Text("Version 7.0.1", color = MaterialTheme.colorScheme.onSurface)
+                Text("Version 7.0.2", color = MaterialTheme.colorScheme.onSurface)
                 Text(
                     "On-device video and photo downloading. Only download or keep content you are authorised to use.",
                     style = MaterialTheme.typography.bodySmall,
